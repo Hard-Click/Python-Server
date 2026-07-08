@@ -1,10 +1,7 @@
-"""주간 강의 배정 스케줄러 (OR-Tools CP-SAT).
+"""주간 강의 배정 도메인 로직 (OR-Tools CP-SAT).
 
-x[강의, 주] = BoolVar (배정 여부)
-- AddAtMostOne: 강의당 한 주만 배정
-- weekly_cap 제약: 주별 합계 <= 그 주 용량
-- 마감일 제약: 마감 이후 주는 배정변수 자체를 배제
-- 선수관계: 주(선수강의) <= 주(후속강의)
+⚠️ 이 파일은 DB·네트워크·프레임워크를 절대 import하지 않는다.
+   외부 데이터는 전부 파라미터로 받고, 결과는 순수 값으로 반환한다.
 """
 from ortools.sat.python import cp_model
 
@@ -14,13 +11,12 @@ def generate_weekly_schedule(lessons, weekly_caps, prerequisites=None):
     lessons: [{"id": str, "duration_min": int, "deadline_week": int|None}]
     weekly_caps: [int] — 주차별 용량(분), index 0 = 이번 주
     prerequisites: [(선수강의id, 후속강의id)]
-    반환: {lesson_id: week_index} 또는 배정 실패 시 None
+    반환: {lesson_id: week_index} 또는 배정 실패 시 None(=완주 불가)
     """
     model = cp_model.CpModel()
     num_weeks = len(weekly_caps)
     lesson_ids = [l["id"] for l in lessons]
 
-    # x[lesson_id][week] = BoolVar
     x = {}
     for lesson in lessons:
         deadline = lesson.get("deadline_week")
@@ -28,19 +24,17 @@ def generate_weekly_schedule(lessons, weekly_caps, prerequisites=None):
         for w in range(num_weeks):
             if w <= max_week:
                 x[(lesson["id"], w)] = model.NewBoolVar(f"x_{lesson['id']}_{w}")
-        # 강의당 정확히 한 주 배정 (배정 불가능하면 infeasible로 드러남)
         model.AddExactlyOne(x[(lesson["id"], w)] for w in range(num_weeks) if (lesson["id"], w) in x)
 
-    # 주별 용량 제약
     for w in range(num_weeks):
-        terms = []
-        for lesson in lessons:
-            if (lesson["id"], w) in x:
-                terms.append(lesson["duration_min"] * x[(lesson["id"], w)])
+        terms = [
+            lesson["duration_min"] * x[(lesson["id"], w)]
+            for lesson in lessons
+            if (lesson["id"], w) in x
+        ]
         if terms:
             model.Add(sum(terms) <= weekly_caps[w])
 
-    # 선수관계: 선수강의 주 <= 후속강의 주
     if prerequisites:
         week_of = {}
         for lesson in lessons:
@@ -54,15 +48,30 @@ def generate_weekly_schedule(lessons, weekly_caps, prerequisites=None):
                 model.Add(week_of[pre_id] <= week_of[post_id])
 
     solver = cp_model.CpSolver()
-    solver.parameters.num_search_workers = 4  # 소규모 문제라 4개면 충분(전체코어보다 빠름)
+    solver.parameters.num_search_workers = 4
     status = solver.Solve(model)
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        return None  # infeasible — 상위 로직에서 "완주 불가" 경고 처리
+        return None
 
     return {
         lesson_id: w
         for lesson_id in lesson_ids
         for w in range(num_weeks)
         if (lesson_id, w) in x and solver.Value(x[(lesson_id, w)]) == 1
+    }
+
+
+def split_weekly_budget_by_grades(total_minutes: int, grades: dict) -> dict:
+    """다중코스 cap 예산 분배. grades: {course_id: 등급(1~9)} — 등급 나쁠수록(숫자 클수록) 더 배정.
+    모의고사 없는 과목은 grades에서 빠지며, 그 경우 남은 예산을 균등분배(콜드스타트 폴백)."""
+    if not grades:
+        return {}
+    total_grade = sum(grades.values())
+    if total_grade == 0:
+        even = total_minutes // len(grades)
+        return {course_id: even for course_id in grades}
+    return {
+        course_id: round(total_minutes * grade / total_grade)
+        for course_id, grade in grades.items()
     }

@@ -1,3 +1,7 @@
 ortools>=9.10
 fsrs>=4.0
+requests>=2.32
+pymysql>=1.1
+Flask>=3.0
+pytest>=8.0
 lifelines>=0.29
