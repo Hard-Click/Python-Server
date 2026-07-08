@@ -7,11 +7,12 @@ class ErrorRouterNotifier:
     def __init__(self, base_url: str | None = None):
         self.base_url = base_url or os.environ["ERROR_ROUTER_URL"]  # 예: http://<python-ec2-ip>:4000
 
-    def notify_failure(self, title: str, message: str) -> None:
+    def notify_failure(self, title: str, message: str, source: str = "python") -> None:
+        """source='python' - error-router의 전용 채널로 라우팅됨(백엔드/프론트 알림과 분리)."""
         try:
             requests.post(
                 f"{self.base_url}/webhook/error",
-                json={"source": "infra", "title": title, "message": message},
+                json={"source": source, "title": title, "message": message},
                 timeout=5,
             )
         except requests.RequestException:
