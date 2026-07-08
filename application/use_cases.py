@@ -6,6 +6,8 @@ from domain.scheduler import generate_weekly_schedule, split_weekly_budget_by_gr
 from domain.review import review_lesson
 from domain.risk import compute_rule_based_risk, risk_label
 from domain.reflow import compute_slip_status, redistribute_remaining_week
+from domain.result import Status
+from domain.errors import AiFunctionError
 from application.ports import (
     LessonRepository, DiagnosticScoreRepository, ScheduleRepository,
     ReviewCardRepository, QuizScoreRepository, ActivityRepository, RiskRepository,
@@ -27,7 +29,10 @@ class GenerateWeeklyScheduleUseCase:
         self.schedule_repo = schedule_repo
 
     def execute(self, member_id: str, enrollments: list[dict], total_weekly_minutes: int, num_weeks: int = 4):
-        """enrollments: [{"enrollment_id","course_id"}]"""
+        """enrollments: [{"enrollment_id","course_id"}]
+        AiFunctionError(계약위반)는 여기서 잡아 결과에 ERROR로 담는다 - 한 코스 버그가
+        같은 학생의 다른 코스 처리를 막지 않도록. Spring 경계로 넘길 때 ErrorCode 매핑은
+        이 결과를 소비하는 presentation 레이어 책임."""
         course_ids = [e["course_id"] for e in enrollments]
         grades = self.diagnostic_repo.get_grades_for_student(member_id, course_ids)
         budget_by_course = split_weekly_budget_by_grades(total_weekly_minutes, grades)
@@ -35,18 +40,23 @@ class GenerateWeeklyScheduleUseCase:
         results = {}
         for enrollment in enrollments:
             course_id = enrollment["course_id"]
-            lessons = self.lesson_repo.get_lessons_for_course(course_id)
-            prerequisites = self.lesson_repo.get_prerequisites(course_id)
-            course_weekly_cap = budget_by_course.get(course_id, total_weekly_minutes // len(enrollments))
-            weekly_caps = [course_weekly_cap] * num_weeks
+            enrollment_id = enrollment["enrollment_id"]
+            try:
+                lessons = self.lesson_repo.get_lessons_for_course(course_id)
+                prerequisites = self.lesson_repo.get_prerequisites(course_id)
+                course_weekly_cap = budget_by_course.get(course_id, total_weekly_minutes // len(enrollments))
+                weekly_caps = [course_weekly_cap] * num_weeks
 
-            assignment = generate_weekly_schedule(lessons, weekly_caps, prerequisites)
-            if assignment is None:
-                results[enrollment["enrollment_id"]] = {"status": "INFEASIBLE"}
-                continue
+                result = generate_weekly_schedule(lessons, weekly_caps, prerequisites)
+                if result.status != Status.OK:
+                    results[enrollment_id] = {"status": result.status.value, "reason": result.reason}
+                    continue
 
-            self.schedule_repo.save_weekly_schedule(enrollment["enrollment_id"], 0, assignment)
-            results[enrollment["enrollment_id"]] = {"status": "OK", "assignment": assignment}
+                assignment = result.data["assignment"]
+                self.schedule_repo.save_weekly_schedule(enrollment_id, 0, assignment)
+                results[enrollment_id] = {"status": Status.OK.value, "assignment": assignment}
+            except AiFunctionError as e:
+                results[enrollment_id] = {"status": "ERROR", "reason": str(e)}
         return results
 
 
@@ -56,13 +66,16 @@ class ReviewLessonUseCase:
         self.quiz_repo = quiz_repo
 
     def execute(self, enrollment_id: str, lesson_id: str):
+        """FsrsComputationError(입력 계약위반)는 호출측(배치 잡)에서 AiFunctionError로 잡게
+        여기선 그대로 전파한다 - 이건 '학생 1명 실패' 단위로 격리할 문제라 배치 레이어 책임."""
         score = self.quiz_repo.get_latest_quiz_score(enrollment_id, lesson_id)
         if score is None:
-            return None  # 퀴즈 미응시 - 복습 스케줄링 대상 아님
+            return None  # 퀴즈 미응시 - 복습 스케줄링 대상 아님 (도메인 에러 아님, 조회 결과 없음)
         card = self.card_repo.get_card(enrollment_id, lesson_id)
-        new_card, due = review_lesson(card, score)
+        result = review_lesson(card, score)  # OK 또는 COLD_START 둘 다 정상 - 그대로 저장
+        new_card = result.data["card"]
         self.card_repo.save_card(enrollment_id, lesson_id, new_card)
-        return due
+        return result.data["due"]
 
 
 class ComputeRiskUseCase:

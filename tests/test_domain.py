@@ -3,6 +3,8 @@ from domain.scheduler import generate_weekly_schedule, split_weekly_budget_by_gr
 from domain.review import quiz_score_to_grade, review_lesson
 from domain.risk import compute_rule_based_risk, risk_label
 from domain.reflow import compute_slip_status, redistribute_remaining_week
+from domain.result import Status
+from domain.errors import SchedulerInputError, FsrsComputationError
 
 
 def test_scheduler_respects_prerequisites_deadline_cap():
@@ -13,14 +15,32 @@ def test_scheduler_respects_prerequisites_deadline_cap():
     ]
     prerequisites = [("math_1", "math_2"), ("math_2", "math_3")]
     result = generate_weekly_schedule(lessons, [180, 180, 180, 180], prerequisites)
-    assert result is not None
-    assert result["math_1"] <= result["math_2"] <= result["math_3"]
+    assert result.status == Status.OK
+    assignment = result.data["assignment"]
+    assert assignment["math_1"] <= assignment["math_2"] <= assignment["math_3"]
 
 
 def test_scheduler_pushes_back_when_cap_too_tight():
     lessons = [{"id": "a", "duration_min": 60, "deadline_week": 3}]
     result = generate_weekly_schedule(lessons, [10, 180, 180, 180])
-    assert result["a"] != 0  # 이번 주 cap이 부족하니 뒤로 밀림
+    assert result.status == Status.OK
+    assert result.data["assignment"]["a"] != 0  # 이번 주 cap이 부족하니 뒤로 밀림
+
+
+def test_scheduler_raises_on_contract_violation():
+    import pytest
+    with pytest.raises(SchedulerInputError):
+        generate_weekly_schedule([{"id": "a", "duration_min": -1}], [180])
+    with pytest.raises(SchedulerInputError):
+        generate_weekly_schedule([{"id": "a", "duration_min": 10}], [])
+
+
+def test_scheduler_returns_infeasible_not_error_when_truly_unsolvable():
+    # deadline_week=0으로 강제 + 그 주 cap이 부족 -> 어디로도 못 밀림 = 진짜 못 풂(에러 아님)
+    lessons = [{"id": "a", "duration_min": 100, "deadline_week": 0}]
+    result = generate_weekly_schedule(lessons, [10])
+    assert result.status == Status.INFEASIBLE
+    assert result.reason
 
 
 def test_budget_split_favors_lower_grade_course():
@@ -35,10 +55,25 @@ def test_quiz_score_to_grade_thresholds():
     assert quiz_score_to_grade(20).name == "Again"
 
 
-def test_review_lesson_works_cold_start():
-    card, due = review_lesson(None, 80)  # 카드 없음 = 콜드스타트
-    assert card is not None
-    assert due is not None
+def test_review_lesson_signals_cold_start_status():
+    result = review_lesson(None, 80)  # 카드 없음 = 콜드스타트
+    assert result.status == Status.COLD_START
+    assert result.data["card"] is not None
+    assert result.data["due"] is not None
+
+
+def test_review_lesson_returns_ok_when_card_exists():
+    first = review_lesson(None, 80)
+    second = review_lesson(first.data["card"], 85)
+    assert second.status == Status.OK
+
+
+def test_review_lesson_raises_on_invalid_score():
+    import pytest
+    with pytest.raises(FsrsComputationError):
+        review_lesson(None, 150)
+    with pytest.raises(FsrsComputationError):
+        review_lesson(None, -1)
 
 
 def test_risk_ranks_personas_correctly():

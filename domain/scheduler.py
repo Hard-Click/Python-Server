@@ -4,15 +4,26 @@
    외부 데이터는 전부 파라미터로 받고, 결과는 순수 값으로 반환한다.
 """
 from ortools.sat.python import cp_model
+from domain.result import AiResult, Status
+from domain.errors import SchedulerInputError
 
 
-def generate_weekly_schedule(lessons, weekly_caps, prerequisites=None):
+def generate_weekly_schedule(lessons, weekly_caps, prerequisites=None) -> AiResult:
     """
     lessons: [{"id": str, "duration_min": int, "deadline_week": int|None}]
     weekly_caps: [int] — 주차별 용량(분), index 0 = 이번 주
     prerequisites: [(선수강의id, 후속강의id)]
-    반환: {lesson_id: week_index} 또는 배정 실패 시 None(=완주 불가)
+    반환: AiResult
+      - OK: data={"assignment": {lesson_id: week_index}}
+      - INFEASIBLE: 주어진 cap/마감일로는 못 풂 (정상적인 '못 풂' - 에러 아님)
+    raise SchedulerInputError: 계약 위반(weekly_caps 비어있음, duration_min 음수 등) - 호출측 버그
     """
+    if not weekly_caps or any(c < 0 for c in weekly_caps):
+        raise SchedulerInputError("weekly_caps는 비어있지 않고 모두 0 이상이어야 함")
+    for lesson in lessons:
+        if "id" not in lesson or lesson.get("duration_min", -1) < 0:
+            raise SchedulerInputError(f"lesson 계약 위반: {lesson}")
+
     model = cp_model.CpModel()
     num_weeks = len(weekly_caps)
     lesson_ids = [l["id"] for l in lessons]
@@ -52,14 +63,15 @@ def generate_weekly_schedule(lessons, weekly_caps, prerequisites=None):
     status = solver.Solve(model)
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        return None
+        return AiResult(Status.INFEASIBLE, reason="주어진 주간 cap/마감일로는 배정 불가능")
 
-    return {
+    assignment = {
         lesson_id: w
         for lesson_id in lesson_ids
         for w in range(num_weeks)
         if (lesson_id, w) in x and solver.Value(x[(lesson_id, w)]) == 1
     }
+    return AiResult(Status.OK, data={"assignment": assignment})
 
 
 def split_weekly_budget_by_grades(total_minutes: int, grades: dict) -> dict:
