@@ -136,3 +136,67 @@ class MySQLRiskRepository:
         """
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql, (enrollment_id, score, label))
+
+
+class MySQLWeeklyProgressRepository:
+    """⚠️ 야간 리플로우용 - 스키마 확정 전 추정 쿼리. DBA 확정되면 여기만 수정."""
+
+    def get_cumulative_slip_minutes(self, enrollment_id: str) -> int:
+        sql = """
+            SELECT COALESCE(SUM(planned_min - actual_min), 0) AS slip
+            FROM daily_achievement
+            WHERE enrollment_id = %s AND achieved = FALSE
+              AND date >= DATE_SUB(CURDATE(), INTERVAL 1 WEEK)
+        """
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(sql, (enrollment_id,))
+            return cur.fetchone()["slip"] or 0
+
+    def get_weekly_average_minutes(self, enrollment_id: str) -> int:
+        sql = """
+            SELECT COALESCE(AVG(planned_min), 0) * 7 AS weekly_avg
+            FROM daily_achievement
+            WHERE enrollment_id = %s
+        """
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(sql, (enrollment_id,))
+            return int(cur.fetchone()["weekly_avg"] or 0)
+
+    def get_remaining_lessons_this_week(self, enrollment_id: str) -> list[dict]:
+        sql = """
+            SELECT l.id, l.expected_duration_min AS duration_min
+            FROM schedule_slot ss
+            JOIN weekly_schedule ws ON ws.id = ss.weekly_schedule_id
+            JOIN lecture l ON l.id = ss.lecture_id
+            WHERE ws.enrollment_id = %s AND ss.status = 'planned'
+              AND ss.plan_date >= CURDATE()
+              AND YEARWEEK(ss.plan_date, 1) = YEARWEEK(CURDATE(), 1)
+        """
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(sql, (enrollment_id,))
+            return cur.fetchall()
+
+    def get_remaining_days_this_week(self, enrollment_id: str) -> int:
+        # 이번 주 일요일 기준 오늘 이후 남은 일수 (Frozen Zone: 오늘은 이미 확정이므로 내일부터 카운트)
+        sql = "SELECT 7 - WEEKDAY(CURDATE()) - 1 AS remaining_days"
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(sql)
+            return max(cur.fetchone()["remaining_days"], 0)
+
+    def get_daily_cap_minutes(self, enrollment_id: str) -> int:
+        sql = "SELECT daily_cap_min FROM enrollment_onboarding WHERE enrollment_id = %s"
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(sql, (enrollment_id,))
+            row = cur.fetchone()
+            return row["daily_cap_min"] if row else 60  # 폴백 기본값
+
+    def save_day_assignment(self, enrollment_id: str, assignment: dict) -> None:
+        sql = """
+            UPDATE schedule_slot ss
+            JOIN weekly_schedule ws ON ws.id = ss.weekly_schedule_id
+            SET ss.plan_date = DATE_ADD(CURDATE(), INTERVAL %s + 1 DAY)
+            WHERE ws.enrollment_id = %s AND ss.lecture_id = %s
+        """
+        with get_connection() as conn, conn.cursor() as cur:
+            for lesson_id, day_offset in assignment.items():
+                cur.execute(sql, (day_offset, enrollment_id, lesson_id))

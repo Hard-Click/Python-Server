@@ -2,6 +2,7 @@
 from domain.scheduler import generate_weekly_schedule, split_weekly_budget_by_grades
 from domain.review import quiz_score_to_grade, review_lesson
 from domain.risk import compute_rule_based_risk, risk_label
+from domain.reflow import compute_slip_status, redistribute_remaining_week
 
 
 def test_scheduler_respects_prerequisites_deadline_cap():
@@ -46,3 +47,29 @@ def test_risk_ranks_personas_correctly():
     assert high > low
     assert risk_label(high) == "HIGH"
     assert risk_label(low) == "LOW"
+
+
+def test_slip_status_triggers_push_at_one_week_threshold():
+    assert compute_slip_status(cumulative_slip_minutes=100, weekly_average_minutes=300) == "on_track"
+    assert compute_slip_status(cumulative_slip_minutes=300, weekly_average_minutes=300) == "push_mode"
+    assert compute_slip_status(cumulative_slip_minutes=500, weekly_average_minutes=0) == "on_track"  # 콜드스타트
+
+
+def test_redistribute_spreads_evenly_when_on_track():
+    lessons = [{"id": "a", "duration_min": 30}, {"id": "b", "duration_min": 30}, {"id": "c", "duration_min": 30}]
+    result = redistribute_remaining_week(lessons, remaining_days=3, status="on_track", daily_cap_min=30)
+    assert set(result.values()) == {0, 1, 2}  # 하루 하나씩 고르게
+
+
+def test_redistribute_front_loads_when_push_mode():
+    lessons = [
+        {"id": "a", "duration_min": 20}, {"id": "b", "duration_min": 20},
+        {"id": "c", "duration_min": 20}, {"id": "d", "duration_min": 20},
+    ]
+    on_track = redistribute_remaining_week(lessons, remaining_days=4, status="on_track", daily_cap_min=30)
+    push = redistribute_remaining_week(lessons, remaining_days=4, status="push_mode", daily_cap_min=30)
+
+    on_track_day0_count = sum(1 for d in on_track.values() if d == 0)
+    push_day0_count = sum(1 for d in push.values() if d == 0)
+    assert push_day0_count > on_track_day0_count  # push_mode가 첫날에 더 많이 몰아넣음(최대강도)
+

@@ -51,6 +51,32 @@ class RiskRepository(Protocol):
         ...
 
 
+class WeeklyProgressRepository(Protocol):
+    """야간 미세조정(nightly_reflow)에 필요한 조회 - Frozen Zone 지키려고 '남은 날짜'만 다룸."""
+
+    def get_cumulative_slip_minutes(self, enrollment_id: str) -> int:
+        ...
+
+    def get_weekly_average_minutes(self, enrollment_id: str) -> int:
+        """콜드스타트(데이터 없음)면 0 반환 -> compute_slip_status가 on_track 처리"""
+        ...
+
+    def get_remaining_lessons_this_week(self, enrollment_id: str) -> list[dict]:
+        """[{"id","duration_min"}] - 이번 주 아직 안 끝낸 것만"""
+        ...
+
+    def get_remaining_days_this_week(self, enrollment_id: str) -> int:
+        """오늘 이후 이번 주 남은 날 수"""
+        ...
+
+    def get_daily_cap_minutes(self, enrollment_id: str) -> int:
+        ...
+
+    def save_day_assignment(self, enrollment_id: str, assignment: dict) -> None:
+        """{lesson_id: day_offset} 저장 - 이번 주 스케줄 슬롯 갱신"""
+        ...
+
+
 class NotifierPort(Protocol):
     def notify_failure(self, title: str, message: str) -> None:
         """실패 시 error-router(/webhook/error)로 Slack 알림"""
