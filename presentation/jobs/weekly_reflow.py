@@ -34,13 +34,25 @@ def run():
 
     try:
         by_student = get_active_enrollments_by_student()
-        for member_id, enrollments in by_student.items():
+    except Exception as e:  # noqa: BLE001 - 배치 시작 자체가 안 되는 치명적 상황(DB 다운 등)
+        notifier.notify_failure("주간 리플로우 전체 실패 (활성 수강 목록 조회 불가)", str(e))
+        raise
+
+    failures = []  # 한 학생 실패가 나머지를 막지 않도록 격리
+    for member_id, enrollments in by_student.items():
+        try:
             schedule_use_case.execute(member_id, enrollments, total_weekly_minutes=420)  # TODO: 학생별 cap 조회로 교체
             for enrollment in enrollments:
                 risk_use_case.execute(enrollment["enrollment_id"])
-    except Exception as e:  # noqa: BLE001 - 배치는 실패해도 죽지 않고 알림만 보냄
-        notifier.notify_failure("주간 리플로우 실패", str(e))
-        raise
+        except Exception as e:  # noqa: BLE001
+            failures.append((member_id, str(e)))
+            print(f"[weekly_reflow] member_id={member_id}: FAILED - {e}")
+
+    if failures:
+        detail = "\n".join(f"- member_id={mid}: {err}" for mid, err in failures[:10])
+        if len(failures) > 10:
+            detail += f"\n...외 {len(failures) - 10}건 더"
+        notifier.notify_failure(f"주간 리플로우 일부 실패 ({len(failures)}/{len(by_student)}건)", detail)
 
 
 if __name__ == "__main__":
