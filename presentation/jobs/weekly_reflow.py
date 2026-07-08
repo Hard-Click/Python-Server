@@ -14,7 +14,9 @@ notifier = ErrorRouterNotifier()
 
 def get_active_enrollments_by_student() -> dict:
     """{member_id: [{"enrollment_id","course_id"}]} - 학생별로 묶어야 다중코스 cap 분배 가능"""
-    sql = "SELECT member_id, id AS enrollment_id, course_id FROM enrollment WHERE status = 'active'"
+    # enrollment.status enum: COMPLETED/ENROLLED/EXPIRED/IN_PROGRESS/REFUNDED - "활성"은 이 둘
+    # enrollment의 PK 컬럼명은 'id'가 아니라 'enrollment_id'
+    sql = "SELECT member_id, enrollment_id, course_id FROM enrollment WHERE status IN ('ENROLLED', 'IN_PROGRESS')"
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(sql)
         rows = cur.fetchall()
@@ -24,6 +26,16 @@ def get_active_enrollments_by_student() -> dict:
             {"enrollment_id": row["enrollment_id"], "course_id": row["course_id"]}
         )
     return grouped
+
+
+def get_weekly_minutes_for_student(member_id: str, default_daily_cap: int = 60) -> int:
+    """student_capacity.daily_cap_min * 7. 값 없으면(콜드스타트) 기본 하루 60분으로 폴백."""
+    sql = "SELECT daily_cap_min FROM student_capacity WHERE student_id = %s"
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (member_id,))
+        row = cur.fetchone()
+        daily_cap = row["daily_cap_min"] if row and row["daily_cap_min"] else default_daily_cap
+        return daily_cap * 7
 
 
 def run():
@@ -41,7 +53,8 @@ def run():
     failures = []  # 한 학생 실패가 나머지를 막지 않도록 격리
     for member_id, enrollments in by_student.items():
         try:
-            schedule_use_case.execute(member_id, enrollments, total_weekly_minutes=420)  # TODO: 학생별 cap 조회로 교체
+            weekly_minutes = get_weekly_minutes_for_student(member_id)
+            schedule_use_case.execute(member_id, enrollments, total_weekly_minutes=weekly_minutes)
             for enrollment in enrollments:
                 risk_use_case.execute(enrollment["enrollment_id"])
         except Exception as e:  # noqa: BLE001
