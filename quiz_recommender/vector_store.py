@@ -1,7 +1,7 @@
 """Qdrant 벡터 저장/검색. questionId를 point id로 사용한다."""
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
-    Distance, VectorParams, PointStruct,
+    Distance, VectorParams, PointStruct, PayloadSchemaType,
     Filter, FieldCondition, MatchValue, Range, HasIdCondition,
 )
 import config
@@ -10,12 +10,23 @@ _client = QdrantClient(url=config.QDRANT_URL, api_key=config.QDRANT_API_KEY)
 
 
 def ensure_collection() -> None:
-    """컬렉션이 없으면 코사인 거리로 생성 (최초 1회)."""
+    """컬렉션이 없으면 코사인 거리로 생성하고, 필터 대상 payload 필드에 인덱스를 만든다.
+    Qdrant는 payload 필드로 필터하려면 해당 필드에 인덱스가 있어야 한다."""
     if not _client.collection_exists(config.COLLECTION):
         _client.create_collection(
             collection_name=config.COLLECTION,
             vectors_config=VectorParams(size=config.EMBEDDING_DIM, distance=Distance.COSINE),
         )
+    # 필터에 쓰는 정수 필드들 인덱스 생성 (이미 있으면 무시 — 멱등)
+    for field in ("courseId", "sectionId", "difficulty"):
+        try:
+            _client.create_payload_index(
+                collection_name=config.COLLECTION,
+                field_name=field,
+                field_schema=PayloadSchemaType.INTEGER,
+            )
+        except Exception:
+            pass  # 이미 인덱스가 있는 경우
 
 
 def existing_id_hashes() -> dict[int, str]:
