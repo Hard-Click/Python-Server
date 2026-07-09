@@ -13,8 +13,9 @@ import embedding
 import vector_store
 
 
-def _content_hash(text: str, explanation: str | None) -> str:
-    raw = (text or "") + "\x00" + (explanation or "")
+def _content_hash(text: str, explanation: str | None, difficulty) -> str:
+    # difficulty도 포함 → 난이도만 바뀌어도 payload가 갱신됨
+    raw = (text or "") + "\x00" + (explanation or "") + "\x00" + str(difficulty)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -27,8 +28,9 @@ def _build_text(row: dict) -> str:
 
 
 def _fetch_all_questions() -> list[dict]:
+    # difficulty는 quiz_question에 컬럼 추가(마이그레이션) 후 채워진다.
     sql = """
-        SELECT q.question_id, q.question_text, q.explanation,
+        SELECT q.question_id, q.question_text, q.explanation, q.difficulty,
                qz.course_id, qz.section_id
         FROM quiz_question q
         JOIN quiz qz ON q.quiz_id = qz.quiz_id
@@ -53,7 +55,7 @@ def reindex() -> dict:
     changed_rows: list[dict] = []
     changed_hashes: list[str] = []
     for qid, row in desired.items():
-        h = _content_hash(row["question_text"], row["explanation"])
+        h = _content_hash(row["question_text"], row["explanation"], row.get("difficulty"))
         if existing.get(qid) != h:
             changed_rows.append(row)
             changed_hashes.append(h)

@@ -2,7 +2,7 @@
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance, VectorParams, PointStruct,
-    Filter, FieldCondition, MatchValue, HasIdCondition,
+    Filter, FieldCondition, MatchValue, Range, HasIdCondition,
 )
 import config
 
@@ -41,7 +41,12 @@ def upsert(rows: list[dict], vectors: list[list[float]], hashes: list[str]) -> N
         PointStruct(
             id=r["question_id"],
             vector=vec,
-            payload={"courseId": r["course_id"], "sectionId": r["section_id"], "hash": h},
+            payload={
+                "courseId": r["course_id"],
+                "sectionId": r["section_id"],
+                "difficulty": r.get("difficulty"),   # 스키마에 difficulty 추가 후 채워짐
+                "hash": h,
+            },
         )
         for r, vec, h in zip(rows, vectors, hashes)
     ]
@@ -52,15 +57,39 @@ def delete_ids(ids: list[int]) -> None:
     _client.delete(collection_name=config.COLLECTION, points_selector=list(ids))
 
 
-def search_similar(question_id: int, course_id: int, exclude_ids: set[int], limit: int) -> list[int]:
-    """question_id 문제와 유사한 문제를 같은 course 안에서 검색.
+def retrieve_meta(problem_id: int) -> dict | None:
+    """저장된 문제의 course/section/difficulty 조회. 없으면 None(=미인덱싱)."""
+    res = _client.retrieve(
+        collection_name=config.COLLECTION,
+        ids=[problem_id], with_payload=True, with_vectors=False,
+    )
+    if not res:
+        return None
+    p = res[0].payload or {}
+    return {"courseId": p.get("courseId"), "sectionId": p.get("sectionId"), "difficulty": p.get("difficulty")}
+
+
+def search(query_id: int, spec: dict, exclude_ids: set[int], limit: int) -> list[int]:
+    """query_id 문제 벡터를 기준으로 spec 필터에 맞는 유사 문제 검색.
+    spec 예: {"courseId":5,"sectionId":12,"difficulty":2}
+             {"courseId":5,"sectionId":12,"difficulty_range":(1,3)}
+             {"courseId":5}
     저장된 벡터를 query로 재사용하므로 텍스트 재전송이 필요 없다."""
+    must = [FieldCondition(key="courseId", match=MatchValue(value=spec["courseId"]))]
+    if "sectionId" in spec:
+        must.append(FieldCondition(key="sectionId", match=MatchValue(value=spec["sectionId"])))
+    if "difficulty" in spec:
+        must.append(FieldCondition(key="difficulty", match=MatchValue(value=spec["difficulty"])))
+    if "difficulty_range" in spec:
+        lo, hi = spec["difficulty_range"]
+        must.append(FieldCondition(key="difficulty", range=Range(gte=lo, lte=hi)))
+
     res = _client.query_points(
         collection_name=config.COLLECTION,
-        query=question_id,   # 저장된 point를 기준으로 최근접 검색
+        query=query_id,
         query_filter=Filter(
-            must=[FieldCondition(key="courseId", match=MatchValue(value=course_id))],
-            must_not=[HasIdCondition(has_id=list(exclude_ids))],
+            must=must,
+            must_not=[HasIdCondition(has_id=list(exclude_ids))] if exclude_ids else None,
         ),
         limit=limit, with_payload=False,
     )
