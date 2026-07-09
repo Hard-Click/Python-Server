@@ -10,10 +10,11 @@ notifier = ErrorRouterNotifier()
 
 
 def get_active_enrollment_ids() -> list[str]:
-    sql = "SELECT id FROM enrollment WHERE status = 'active'"
+    # enrollment.status enum: COMPLETED/ENROLLED/EXPIRED/IN_PROGRESS/REFUNDED - "활성"은 이 둘
+    sql = "SELECT enrollment_id FROM enrollment WHERE status IN ('ENROLLED', 'IN_PROGRESS')"
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(sql)
-        return [row["id"] for row in cur.fetchall()]
+        return [row["enrollment_id"] for row in cur.fetchall()]
 
 
 def run():

@@ -74,7 +74,7 @@ class ComputeRiskUseCase:
         recency, streak = self.activity_repo.get_recency_and_streak(enrollment_id)
         score = compute_rule_based_risk(recency, streak)
         label = risk_label(score)
-        self.risk_repo.save_risk_score(enrollment_id, score, label)
+        self.risk_repo.save_risk_score(enrollment_id, score, label, recency_days=recency, miss_streak=streak)
         return score, label
 
 
