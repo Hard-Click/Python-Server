@@ -1,0 +1,6 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+openai>=1.30
+qdrant-client>=1.9
+pymysql>=1.1
+pydantic>=2.6
