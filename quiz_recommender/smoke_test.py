@@ -4,7 +4,7 @@
 "비슷한 문제"가 결과로 나오면 성공.
 
 실행 (PowerShell):
-    $env:OPENAI_API_KEY="sk-..."
+    $env:GEMINI_API_KEY="..."
     $env:QDRANT_URL="https://xxxx.aws.cloud.qdrant.io:6333"
     $env:QDRANT_API_KEY="..."
     python smoke_test.py

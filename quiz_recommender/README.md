@@ -1,7 +1,7 @@
 # Quiz Recommender
 
 퀴즈 복습 시 **틀린 문제 + 유사 문제**를 묶어주는 추천 모듈.
-OpenAI 임베딩 + Qdrant 벡터 검색.
+Gemini 임베딩 + Qdrant 벡터 검색.
 
 > 종준 스케줄러(`Python-Server`)와 **같은 레포(모노레포)**의 독립 폴더다.
 > 문제 데이터는 같은 RDS를 읽는다("RDS 공유" 철학 동일).
@@ -12,7 +12,7 @@ OpenAI 임베딩 + Qdrant 벡터 검색.
 recommender.py   진입 함수 get_similar_problems() ← 종준 FSRS가 호출
 indexer.py       배치: RDS에서 문제 읽어 임베딩 → Qdrant 동기화
 vector_store.py  Qdrant 저장/검색 (questionId = point id)
-embedding.py     OpenAI 임베딩 (배치 호출)
+embedding.py     Gemini 임베딩 (배치 호출, gemini-embedding-001)
 db.py            공유 RDS(MySQL) 연결
 config.py        환경변수 설정
 app.py           로컬 테스트용 HTTP 래퍼 (선택 — 프로덕션 경로 아님)
@@ -20,7 +20,7 @@ app.py           로컬 테스트용 HTTP 래퍼 (선택 — 프로덕션 경로
 
 ## 동작 방식
 ```
-[배치] indexer.py ──RDS에서 문제 읽기──▶ OpenAI 임베딩 ──▶ Qdrant
+[배치] indexer.py ──RDS에서 문제 읽기──▶ Gemini 임베딩 ──▶ Qdrant
 [추천] 종준 FSRS ──get_similar_problems(problem_id, k)──▶ Qdrant 검색 ──▶ [원문제, 유사...]
 ```
 - **인덱싱은 배치**가 RDS를 직접 읽어 처리.
@@ -50,9 +50,9 @@ get_similar_problems(student_id, problem_id, k=2)
 ```bash
 python -m venv .venv && .venv\Scripts\activate    # Windows
 pip install -r requirements.txt
-copy .env.example .env    # 값 채우기 (OpenAI/Qdrant/RDS)
+copy .env.example .env    # 값 채우기 (Gemini/Qdrant/RDS)
 ```
-> ⚠️ OpenAI 대시보드에서 **월 사용 한도(예: $5)** 꼭 설정. RDS는 **읽기 전용 계정** 권장.
+> ⚠️ Gemini 키는 Google AI Studio(aistudio.google.com/apikey)에서 발급. RDS는 **읽기 전용 계정** 권장.
 
 ## 실행
 ```bash
