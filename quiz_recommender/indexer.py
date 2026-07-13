@@ -10,6 +10,7 @@ import json
 
 import db
 import embedding
+import preprocess
 import vector_store
 
 
@@ -20,10 +21,11 @@ def _content_hash(text: str, explanation: str | None, difficulty) -> str:
 
 
 def _build_text(row: dict) -> str:
-    """임베딩 입력: 문제 본문 + (있으면) 해설."""
-    text = row["question_text"]
-    if row.get("explanation"):
-        text += "\n" + row["explanation"]
+    """임베딩 입력: 문제 본문 + (있으면) 해설. 각각 수식 표기 정규화."""
+    text = preprocess.normalize(row["question_text"])
+    explanation = preprocess.normalize(row.get("explanation"))
+    if explanation:
+        text += "\n" + explanation
     return text
 
 
