@@ -1,6 +1,7 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
-openai>=1.30
+google-genai>=1.0
 qdrant-client>=1.9
 pymysql>=1.1
 pydantic>=2.6
+requests>=2.31

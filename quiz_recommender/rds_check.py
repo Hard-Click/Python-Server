@@ -10,6 +10,8 @@ import db
 
 
 def main() -> None:
+    import sys
+    sys.stdout.reconfigure(encoding="utf-8")  # Windows 콘솔(cp949) 인코딩 오류 방지
     conn = db.get_connection()
     try:
         with conn.cursor() as cur:
@@ -30,7 +32,7 @@ def main() -> None:
                 f"JOIN quiz qz ON q.quiz_id = qz.quiz_id LIMIT 3"
             )
             rows = cur.fetchall()
-            print(f"\n인덱서 SELECT 실제 실행 성공 — 샘플 {len(rows)}개:")
+            print(f"\n인덱서 SELECT 실제 실행 성공 - 샘플 {len(rows)}개:")
             for r in rows:
                 text = (r["question_text"] or "")[:30]
                 print(f"  #{r['question_id']} course={r['course_id']} section={r['section_id']} : {text}...")

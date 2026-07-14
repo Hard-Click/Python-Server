@@ -21,10 +21,10 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
-EMBEDDING_MODEL = "text-embedding-3-small"   # 1536차원, 저렴·한국어 무난
-EMBEDDING_DIM = 1536
+EMBEDDING_MODEL = "gemini-embedding-001"   # Gemini. output_dimensionality로 차원 조절(Matryoshka)
+EMBEDDING_DIM = 1536                        # 1536으로 맞춰 기존 Qdrant 컬렉션과 호환 유지
 COLLECTION = "quiz_questions"
 
 QDRANT_URL = os.environ["QDRANT_URL"]
 QDRANT_API_KEY = os.environ["QDRANT_API_KEY"]
-# OPENAI_API_KEY 는 openai SDK가 환경변수에서 자동으로 읽는다(위에서 .env 로드됨).
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]

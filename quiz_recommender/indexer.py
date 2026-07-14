@@ -75,4 +75,13 @@ def reindex() -> dict:
 
 
 if __name__ == "__main__":
-    print(json.dumps(reindex(), ensure_ascii=False))
+    import notifier
+    try:
+        result = reindex()
+        print(json.dumps(result, ensure_ascii=False))
+    except Exception as e:  # noqa: BLE001 - 배치 전체 실패(RDS/Gemini/Qdrant 다운 등)는 Slack 알림 후 재-raise
+        notifier.notify_failure(
+            "퀴즈 추천 인덱서 배치 실패",
+            f"indexer.reindex() 예외: {type(e).__name__}: {e}",
+        )
+        raise  # 크론이 비정상 종료로 인지하도록 예외는 그대로 올린다
