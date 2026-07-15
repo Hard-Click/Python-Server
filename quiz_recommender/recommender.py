@@ -22,8 +22,11 @@ get_similar_problems(student_id, problem_id, k=2)  → 문제 id 리스트
 주의:
 - difficulty 폴백은 quiz_question.difficulty 컬럼 추가(마이그레이션) 후 동작. 컬럼 없으면 자동으로 section/course 폴백만 사용.
 """
-import db
-import vector_store
+try:
+    from . import db, vector_store
+except ImportError:
+    import db
+    import vector_store
 
 
 def get_similar_problems(student_id: int, problem_id: int, k: int = 2) -> list[int]:

@@ -8,8 +8,12 @@
 """
 from fastapi import FastAPI
 
-import vector_store
-from recommender import get_similar_problems
+try:
+    from . import vector_store
+    from .recommender import get_similar_problems
+except ImportError:
+    import vector_store
+    from recommender import get_similar_problems
 
 app = FastAPI(title="Quiz Recommender (test harness)")
 

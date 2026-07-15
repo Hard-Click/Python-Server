@@ -8,7 +8,11 @@
 """
 from google import genai
 from google.genai import types
-import config
+
+try:                       # 패키지로 import될 때 / 스크립트로 직접 실행될 때 모두 지원
+    from . import config
+except ImportError:
+    import config
 
 _client = genai.Client(api_key=config.GEMINI_API_KEY)
 _BATCH = 100   # 한 요청에 넣을 최대 텍스트 수 (API 배치 한도 내에서 보수적으로)

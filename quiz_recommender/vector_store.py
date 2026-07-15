@@ -4,7 +4,11 @@ from qdrant_client.models import (
     Distance, VectorParams, PointStruct, PayloadSchemaType,
     Filter, FieldCondition, MatchValue, Range, HasIdCondition,
 )
-import config
+
+try:
+    from . import config
+except ImportError:
+    import config
 
 _client = QdrantClient(url=config.QDRANT_URL, api_key=config.QDRANT_API_KEY)
 

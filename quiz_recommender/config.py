@@ -27,4 +27,4 @@ COLLECTION = "quiz_questions"
 
 QDRANT_URL = os.environ["QDRANT_URL"]
 QDRANT_API_KEY = os.environ["QDRANT_API_KEY"]
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")  # 추천 경로엔 불필요(인덱싱만 씀) → 키 없어도 import 통과

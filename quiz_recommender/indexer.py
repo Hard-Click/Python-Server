@@ -8,10 +8,13 @@
 import hashlib
 import json
 
-import db
-import embedding
-import preprocess
-import vector_store
+try:
+    from . import db, embedding, preprocess, vector_store
+except ImportError:
+    import db
+    import embedding
+    import preprocess
+    import vector_store
 
 
 def _content_hash(text: str, explanation: str | None, difficulty) -> str:
@@ -75,7 +78,10 @@ def reindex() -> dict:
 
 
 if __name__ == "__main__":
-    import notifier
+    try:
+        from . import notifier
+    except ImportError:
+        import notifier
     try:
         result = reindex()
         print(json.dumps(result, ensure_ascii=False))
