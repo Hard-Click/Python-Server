@@ -118,3 +118,29 @@ def test_respects_k_three(rec, monkeypatch):
         rec.vector_store, "search", _seq_search([[201, 202, 203, 204]]), raising=False
     )
     assert rec.get_similar_problems(1, 100, k=3) == [100, 201, 202, 203]
+
+
+# --- 장애 시 degradation (종준 확정 정책 ⓐ): 예외 대신 [원문제]로 눌러 추천만 스킵 ---
+
+def test_rds_failure_degrades_to_self(rec, monkeypatch):
+    """RDS 존재확인 중 장애 → 예외 전파 없이 [원문제]만 (배치가 skip 처리)."""
+    def _boom(pid):
+        raise RuntimeError("RDS down")
+    monkeypatch.setattr(rec, "_exists_in_rds", _boom)
+    assert rec.get_similar_problems(1, 100, k=2) == [100]
+
+
+def test_qdrant_meta_failure_degrades_to_self(rec, monkeypatch):
+    """Qdrant retrieve_meta 장애 → [원문제]만 (id는 유효하므로 [] 아님)."""
+    def _boom(pid):
+        raise RuntimeError("Qdrant down")
+    monkeypatch.setattr(rec.vector_store, "retrieve_meta", _boom, raising=False)
+    assert rec.get_similar_problems(1, 100, k=2) == [100]
+
+
+def test_qdrant_search_failure_degrades_to_self(rec, monkeypatch):
+    """유사문제 검색(search) 장애 → [원문제]만 (복습은 그대로 진행)."""
+    def _boom(query_id, spec, exclude_ids, limit):
+        raise RuntimeError("Qdrant search failed")
+    monkeypatch.setattr(rec.vector_store, "search", _boom, raising=False)
+    assert rec.get_similar_problems(1, 100, k=2) == [100]

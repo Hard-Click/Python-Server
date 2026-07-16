@@ -22,19 +22,42 @@ get_similar_problems(student_id, problem_id, k=2)  → 문제 id 리스트
 주의:
 - difficulty 폴백은 quiz_question.difficulty 컬럼 추가(마이그레이션) 후 동작. 컬럼 없으면 자동으로 section/course 폴백만 사용.
 """
+import logging
+
 try:
     from . import db, vector_store
 except ImportError:
     import db
     import vector_store
 
+logger = logging.getLogger(__name__)
+
 
 def get_similar_problems(student_id: int, problem_id: int, k: int = 2) -> list[int]:
     # student_id는 종준 계약상 받는다(현재 필터엔 미사용 — 추후 개인화/풀이이력 제외에 활용 가능).
-    # 반환 규칙: 빈 리스트[]=잘못된 id, 원문제 포함=정상(유사 0~k개 가변).
-    if not _exists_in_rds(problem_id):
+    # 반환 규칙(종준 FSRS와 확정):
+    #   []                     = 잘못된 id          → 배치: skip
+    #   [problem_id]           = 유사 없음 or 장애   → 배치: skip (복습은 그대로 진행)
+    #   [problem_id, 유사...]  = 정상(유사 0~k개 가변)
+    # 정책 ⓐ: RDS/Qdrant 장애는 예외를 밖으로 던지지 않고 [원문제]로 눌러 추천만 조용히 스킵한다.
+    #         (종준 배치가 예외 처리를 신경 쓰지 않도록 — 계약은 '리턴값'으로만 표현)
+    try:
+        exists = _exists_in_rds(problem_id)
+    except Exception:  # noqa: BLE001 - RDS 장애. 유효성 판단 불가하나 배치는 실제 오답 id로만 호출 → 원문제만
+        logger.warning("추천 스킵(RDS 존재확인 실패) problem_id=%s", problem_id, exc_info=True)
+        return [problem_id]
+
+    if not exists:
         return []  # 잘못된 id → 빈 리스트
 
+    try:
+        return _recommend(problem_id, k)
+    except Exception:  # noqa: BLE001 - Qdrant 등 추천 인프라 장애 → 추천만 스킵(복습은 진행)
+        logger.warning("추천 스킵(유사문제 검색 실패) problem_id=%s", problem_id, exc_info=True)
+        return [problem_id]
+
+
+def _recommend(problem_id: int, k: int) -> list[int]:
     meta = vector_store.retrieve_meta(problem_id)
     if meta is None:
         return [problem_id]  # 유효하지만 아직 인덱싱 전 → 원문제만

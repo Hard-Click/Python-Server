@@ -28,12 +28,13 @@ app.py           로컬 테스트용 HTTP 래퍼 (선택 — 프로덕션 경로
 
 ## 진입 함수
 ```python
-from recommender import get_similar_problems
+from quiz_recommender import get_similar_problems   # Python-Server/ 루트 기준
 
 get_similar_problems(student_id, problem_id, k=2)
 # 정상+유사 충분 → [원문제, 유사1, 유사2]
 # 유사 1개뿐     → [원문제, 유사1]
 # 유사 없음       → [원문제]        (원문제 있음 = 정상)
+# 장애(RDS/Qdrant)→ [원문제]        (예외 안 던짐 — 추천만 조용히 스킵)
 # 잘못된 id       → []              (빈 리스트 = 에러)
 # 규칙: 결과가 비었으면 잘못된 id, 원문제가 있으면 정상(유사 0~k개 가변)
 ```
@@ -44,7 +45,10 @@ get_similar_problems(student_id, problem_id, k=2)
 4. 같은 course (인접 섹션 포함)
 → 그래도 없으면 원문제만 반환.
 
-> ⚠️ 함수 시그니처·에러 방식은 **종준과 최종 확정 필요**(Day1 계약). 현재는 미인덱싱/없는 id면 원문제만 반환.
+> **종준 FSRS 통합 확정(계약)**:
+> - import 경로: `from quiz_recommender import get_similar_problems` (Python-Server/ 루트 실행)
+> - 호출: 새벽 리프레시 배치가 학생별로 틀린 `question_id`마다 sync 1회 루프 호출
+> - 에러 방식(정책 ⓐ): RDS/Qdrant **장애 시에도 예외를 던지지 않고 `[원문제]` 반환** → 배치는 `[]`=잘못된 id skip, `[원문제]`=추천 없음 skip 으로 처리하면 예외 처리 불필요.
 
 ## 세팅
 ```bash
