@@ -2,7 +2,7 @@
 크론탭: python -m presentation.jobs.nightly_reflow
 """
 from application.use_cases import NightlyReflowUseCase
-from infrastructure.repositories import MySQLWeeklyProgressRepository
+from infrastructure.repositories import MySQLWeeklyProgressRepository, MySQLSubscriptionRepository
 from infrastructure.error_router_client import ErrorRouterNotifier
 from infrastructure.db import get_connection
 
@@ -18,7 +18,7 @@ def get_active_enrollment_ids() -> list[str]:
 
 
 def run():
-    use_case = NightlyReflowUseCase(MySQLWeeklyProgressRepository())
+    use_case = NightlyReflowUseCase(MySQLWeeklyProgressRepository(), MySQLSubscriptionRepository())
 
     try:
         enrollment_ids = get_active_enrollment_ids()
