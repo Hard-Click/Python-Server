@@ -1,11 +1,28 @@
 """application/ports.py의 인터페이스를 실제 RDS 쿼리로 구현.
 
-⚠️ 테이블/컬럼명은 PO 설계 문서 기준 추정치임. DBA가 실제 마이그레이션 확정하면
-   이 파일의 SQL만 고치면 되고, use_cases.py/domain/은 전혀 안 건드려도 됨
-   (Clean Architecture로 나눈 이유가 바로 이거 - 스키마 변경의 영향범위를 여기로 가둠).
+2026-07-08: 종호(DBA)가 만든 V3.1.x/V3.3.x 마이그레이션(hc-backend develop 브랜치) 기준으로
+전면 수정. 이 마이그레이션들은 아직 실제 RDS에 배포 전(develop→main 배포 대기 중)이라,
+배포 전까지는 이 레포의 쿼리들이 대상 테이블 없음 에러를 낼 수 있음 - 정상.
+컬럼명이 배포 후 다르면 이 파일만 고치면 되고 domain/application은 안 건드려도 됨.
+
+2026-07-16 병합(schedule-optimization): 통합 CP-SAT + shadow mode 스케줄러가 추가로 필요로 하는
+레포(StudentCap/CourseLearningPolicy/LessonProgress/StudentNotification/Experiment/Subscription/
+WrongAnswer)를 종호의 실 스키마 정합본 위에 얹었다. 공유 레포(Lesson/Diagnostic/Schedule/
+ReviewCard/QuizScore/Activity/Risk/WeeklyProgress)는 종호 실 스키마 버전을 유지한다.
+
+핵심 스키마 메모:
+- enrollment의 PK는 'id'가 아니라 'enrollment_id'
+- lesson은 course_id를 직접 안 가짐 - lesson.section_id -> course_section.course_id로 조인
+- quiz는 lesson이 아니라 course_id+section_id 단위 -> lesson_quiz_map(N:N)으로 강의와 연결
+- daily_cap은 enrollment_onboarding이 아니라 student_capacity(student_id=member_id)에 있음(다중코스 cap 정책)
+- 쉬는날 rest_days(비트마스크 bit0=일)는 enrollment_onboarding에 있음
+- Frozen Zone: weekly_schedule.locked=1이면 리플로우 대상에서 반드시 제외
+
+⚠️ 아직 실 스키마로 못 맞춘 레포(추정 스키마 유지, 배치 실행 전 검증 필요):
+LessonProgress(lesson_progress/lecture) / StudentNotification(notification) / Experiment(experiment_*) /
+Subscription(subscription.suneung_date - 실제 컬럼 없음, None 폴백). seed_demo는 이들을 우회하므로 데모엔 영향 없음.
 """
 import json
-import uuid
 
 from domain.review import Card
 from infrastructure.db import get_connection
@@ -13,11 +30,14 @@ from infrastructure.db import get_connection
 
 class MySQLLessonRepository:
     def get_lessons_for_course(self, course_id: str) -> list[dict]:
+        # deadline_week는 lesson마다 없음 - course_learning_policy.recommended_duration_weeks가
+        # 코스 전체의 num_weeks를 결정하므로 상위(use_case)에서 weekly_caps 길이로 이미 처리됨.
         sql = """
-            SELECT id, expected_duration_min AS duration_min, NULL AS deadline_week
-            FROM lecture
-            WHERE course_id = %s
-            ORDER BY sequence_order
+            SELECT l.id, l.duration_seconds / 60 AS duration_min
+            FROM lesson l
+            JOIN course_section cs ON cs.id = l.section_id
+            WHERE cs.course_id = %s
+            ORDER BY l.order_index
         """
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql, (course_id,))
@@ -25,14 +45,15 @@ class MySQLLessonRepository:
 
     def get_prerequisites(self, course_id: str) -> list[tuple]:
         sql = """
-            SELECT lecture_id, prerequisite_lecture_id
-            FROM lecture_prerequisite lp
-            JOIN lecture l ON l.id = lp.lecture_id
-            WHERE l.course_id = %s
+            SELECT lp.prerequisite_lesson_id, lp.lesson_id
+            FROM lesson_prerequisite lp
+            JOIN lesson l ON l.id = lp.lesson_id
+            JOIN course_section cs ON cs.id = l.section_id
+            WHERE cs.course_id = %s
         """
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql, (course_id,))
-            return [(row["prerequisite_lecture_id"], row["lecture_id"]) for row in cur.fetchall()]
+            return [(row["prerequisite_lesson_id"], row["lesson_id"]) for row in cur.fetchall()]
 
 
 class MySQLCourseLearningPolicyRepository:
@@ -59,13 +80,20 @@ class MySQLDiagnosticScoreRepository:
         if not course_ids:
             return {}
         placeholders = ",".join(["%s"] * len(course_ids))
+        # 같은 코스라도 여러 응시일 행이 허용되므로(uq_diag_member_course_date) 최신 것만 채택
         sql = f"""
-            SELECT course_id, grade
-            FROM student_diagnostic_score
-            WHERE member_id = %s AND course_id IN ({placeholders})
+            SELECT sds.course_id, sds.grade
+            FROM student_diagnostic_score sds
+            INNER JOIN (
+                SELECT course_id, MAX(exam_date) AS max_date
+                FROM student_diagnostic_score
+                WHERE member_id = %s AND course_id IN ({placeholders})
+                GROUP BY course_id
+            ) latest ON latest.course_id = sds.course_id AND latest.max_date = sds.exam_date
+            WHERE sds.member_id = %s
         """
         with get_connection() as conn, conn.cursor() as cur:
-            cur.execute(sql, (member_id, *course_ids))
+            cur.execute(sql, (member_id, *course_ids, member_id))
             return {row["course_id"]: row["grade"] for row in cur.fetchall()}
 
 
@@ -118,7 +146,8 @@ class MySQLLessonProgressRepository:
     """⚠️ 추정 스키마: study_timer 도메인의 lesson_progress(실제 학습시간 기록)에
     lecture.expected_duration_min을 조인 - 강사 추정치 대 실제 소요시간 비교용.
     course_id도 같이 반환 - 과목마다 학생의 학습속도가 다를 수 있어 코스별로 계수를 분리해야 함
-    (수학은 느리고 영어는 빠른 학생 등 - 학생 전체 단일 계수로는 이런 편차를 못 잡음)."""
+    (수학은 느리고 영어는 빠른 학생 등 - 학생 전체 단일 계수로는 이런 편차를 못 잡음).
+    ⚠️ 실 스키마는 member_lesson_stat(actual_completion_sec) - 배치 실행 전 정합 필요(seed_demo 우회 중)."""
 
     def get_completed_lesson_durations(self, member_id: str) -> list:
         sql = """
@@ -135,36 +164,31 @@ class MySQLLessonProgressRepository:
 
 class MySQLScheduleRepository:
     def save_weekly_schedule(self, enrollment_id: str, week_no: int, assignment: dict) -> None:
-        """⚠️ 추정 스키마(is_active, generated_batch_id 컬럼 신규 - 마이그레이션 확정 필요).
-
-        '활성 계획 1개' 모델: 매 재생성마다 누적 삽입하면 중복 계획이 쌓이므로, 같은
-        (enrollment, week_no)의 기존 활성 계획을 먼저 비활성화하고 새 계획을 is_active로 넣는다.
-        학생은 계획을 직접 편집하지 않고 실측만 기록 → 시스템이 재생성하므로 계획은 시스템 소유다.
-        generated_batch_id로 어느 생성 배치에서 나왔는지 추적(과거 버전은 비활성으로 남아 감사 가능)."""
-        deactivate_sql = """
-            UPDATE weekly_schedule SET is_active = FALSE
-            WHERE enrollment_id = %s AND week_no = %s AND is_active = TRUE
+        # effective_from=오늘, locked=0(새로 생성된 스케줄은 기본 잠금 해제 - Frozen Zone은
+        # 야간 배치가 "이번 주"에 locked=1을 세팅해서 다음 리플로우부터 보호하는 방식으로 운용)
+        sql_schedule = """
+            INSERT INTO weekly_schedule (enrollment_id, week_no, generated_at, effective_from, locked)
+            VALUES (%s, %s, NOW(), CURDATE(), 0)
         """
-        insert_sql = """
-            INSERT INTO weekly_schedule (enrollment_id, week_no, generated_batch_id, is_active, generated_at)
-            VALUES (%s, %s, %s, TRUE, NOW())
+        sql_slot = """
+            INSERT INTO schedule_slot (weekly_schedule_id, lesson_id, plan_date, planned_min, status)
+            VALUES (%s, %s, DATE_ADD(CURDATE(), INTERVAL %s WEEK), %s, 'PLANNED')
         """
-        slot_sql = """
-            INSERT INTO schedule_slot (weekly_schedule_id, lecture_id, plan_week, status)
-            VALUES (%s, %s, %s, 'planned')
-        """
-        batch_id = uuid.uuid4().hex
+        sql_lesson_duration = "SELECT duration_seconds / 60 AS duration_min FROM lesson WHERE id = %s"
         with get_connection() as conn, conn.cursor() as cur:
-            cur.execute(deactivate_sql, (enrollment_id, week_no))
-            cur.execute(insert_sql, (enrollment_id, week_no, batch_id))
+            cur.execute(sql_schedule, (enrollment_id, week_no))
             schedule_id = cur.lastrowid
-            for lecture_id, plan_week in assignment.items():
-                cur.execute(slot_sql, (schedule_id, lecture_id, plan_week))
+            for lesson_id, week_offset in assignment.items():
+                cur.execute(sql_lesson_duration, (lesson_id,))
+                row = cur.fetchone()
+                planned_min = row["duration_min"] if row else 0
+                cur.execute(sql_slot, (schedule_id, lesson_id, week_offset, planned_min))
 
 
 class MySQLStudentNotificationRepository:
     """⚠️ 추정 스키마: notification 테이블에 학생용 배너를 적재 - 프론트가 조회해서 표시.
-    error_router_client.py(내부 운영진 Slack 알림)와는 완전히 다른 채널이니 섞지 말 것."""
+    error_router_client.py(내부 운영진 Slack 알림)와는 완전히 다른 채널이니 섞지 말 것.
+    ⚠️ 실 스키마는 receiver_id/is_read/redirect_url이고 type ENUM에 SCHEDULE_* 없음 - 배치 실행 전 정합 필요."""
 
     def notify_schedule_extended(self, member_id: str, extended_weeks: int) -> None:
         message = f"이번 주 스케줄이 너무 촘촘해서 완주 목표를 {extended_weeks}주 뒤로 조정했어요."
@@ -227,9 +251,9 @@ class MySQLExperimentRepository:
 class MySQLReviewCardRepository:
     def get_card(self, enrollment_id: str, lesson_id: str):
         sql = """
-            SELECT stability, difficulty, due, state, reps, lapses
+            SELECT stability, difficulty, due
             FROM review_card
-            WHERE enrollment_id = %s AND lecture_id = %s
+            WHERE enrollment_id = %s AND lesson_id = %s
         """
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql, (enrollment_id, lesson_id))
@@ -244,7 +268,7 @@ class MySQLReviewCardRepository:
 
     def save_card(self, enrollment_id: str, lesson_id: str, card: Card) -> None:
         sql = """
-            INSERT INTO review_card (enrollment_id, lecture_id, stability, difficulty, due, state)
+            INSERT INTO review_card (enrollment_id, lesson_id, stability, difficulty, due, state)
             VALUES (%s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
               stability = VALUES(stability), difficulty = VALUES(difficulty),
@@ -255,14 +279,15 @@ class MySQLReviewCardRepository:
 
 
 class MySQLSubscriptionRepository:
-    """⚠️ 추정 스키마: enrollment -> member -> subscription.suneung_date (PO 설계 문서 기준)."""
+    """⚠️ 추정 스키마: enrollment -> member -> subscription.suneung_date.
+    실제 subscription엔 suneung_date 컬럼이 없어 배포 전까지 항상 None(상위 폴백 상수 사용) - 정합 필요."""
 
     def get_suneung_date(self, enrollment_id: str):
         sql = """
             SELECT s.suneung_date
             FROM enrollment e
             JOIN subscription s ON s.member_id = e.member_id
-            WHERE e.id = %s
+            WHERE e.enrollment_id = %s
         """
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql, (enrollment_id,))
@@ -272,23 +297,30 @@ class MySQLSubscriptionRepository:
 
 class MySQLQuizScoreRepository:
     def get_latest_quiz_score(self, enrollment_id: str, lesson_id: str):
+        # quiz는 lesson_id가 없어 lesson_quiz_map(N:N)으로 연결. quiz_submission.score는
+        # 태연 쪽 스케일(0~100 가정, 확인 필요) - FSRS 임계값(90/70/50)과 스케일 안 맞으면 이 함수에서 변환.
         sql = """
-            SELECT score_percent
-            FROM quiz_attempt
-            WHERE enrollment_id = %s AND lecture_id = %s
-            ORDER BY submitted_at DESC
+            SELECT qs.score
+            FROM quiz_submission qs
+            JOIN lesson_quiz_map lqm ON lqm.quiz_id = qs.quiz_id
+            JOIN enrollment e ON e.member_id = qs.member_id
+            WHERE e.enrollment_id = %s AND lqm.lesson_id = %s
+            ORDER BY qs.submitted_at DESC
             LIMIT 1
         """
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql, (enrollment_id, lesson_id))
             row = cur.fetchone()
-            return row["score_percent"] if row else None
+            return row["score"] if row else None
 
     def get_average_quiz_score(self, enrollment_id: str):
+        # 전체 퀴즈 평균(%). 실 스키마 quiz_submission.score(0~100), enrollment→member 조인.
+        # 응시 기록 없으면 None -> 규칙기반 risk는 2축으로 폴백.
         sql = """
-            SELECT AVG(score_percent) AS avg_score
-            FROM quiz_attempt
-            WHERE enrollment_id = %s
+            SELECT AVG(qs.score) AS avg_score
+            FROM quiz_submission qs
+            JOIN enrollment e ON e.member_id = qs.member_id
+            WHERE e.enrollment_id = %s
         """
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql, (enrollment_id,))
@@ -300,9 +332,7 @@ class MySQLWrongAnswerRepository:
     """학생의 특정 퀴즈 '최신 제출'에서 틀린 question_id 목록.
 
     quiz_submission(제출 헤더) -> quiz_submission_answer(문항별 정오) 조인.
-    ⚠️ 이 두 테이블은 seed_demo.py가 쓰는 실제 스키마 기준 - MySQLQuizScoreRepository의
-       quiz_attempt(추정 스키마)와 다름. 같은 학생이 같은 퀴즈를 여러 번 냈으면 submitted_at이
-       가장 최신인 제출만 본다(재응시 이전 오답이 섞이지 않게).
+    같은 학생이 같은 퀴즈를 여러 번 냈으면 submitted_at이 가장 최신인 제출만 본다(재응시 이전 오답 배제).
     반환 question_id가 곧 추천기 problem_id (BE 확인: 같은 id 공간, 매핑 불필요).
     """
 
@@ -325,24 +355,19 @@ class MySQLWrongAnswerRepository:
 
 class MySQLActivityRepository:
     def get_recency_and_streak(self, enrollment_id: str) -> tuple:
-        # miss_streak = '연속' 미달 = 마지막으로 성공(achieved)한 날 이후의 미달 일수.
-        # (기존엔 최근 실패 30개를 그냥 셌는데, 중간에 성공한 날이 있어도 크게 잡혀 streak 의미가
-        #  아니었음 - "연속 미달"이 이탈 momentum 신호라 이렇게 고침. achieved 이력이 없으면
-        #  전 기간이 연속 미달로 간주.)
         sql = """
             SELECT
-              DATEDIFF(CURDATE(), MAX(CASE WHEN achieved THEN date END)) AS recency_days,
-              (SELECT COUNT(*) FROM daily_achievement
-                 WHERE enrollment_id = %s AND achieved = FALSE
-                   AND date > COALESCE(
-                     (SELECT MAX(date) FROM daily_achievement WHERE enrollment_id = %s AND achieved = TRUE),
-                     '1900-01-01')
-              ) AS miss_streak_days
+              DATEDIFF(CURDATE(), MAX(CASE WHEN achieved THEN achieved_date END)) AS recency_days,
+              (SELECT COUNT(*) FROM (
+                 SELECT achieved_date FROM daily_achievement
+                 WHERE enrollment_id = %s AND achieved = 0
+                 ORDER BY achieved_date DESC LIMIT 30
+               ) recent_misses) AS miss_streak_days
             FROM daily_achievement
             WHERE enrollment_id = %s
         """
         with get_connection() as conn, conn.cursor() as cur:
-            cur.execute(sql, (enrollment_id, enrollment_id, enrollment_id))
+            cur.execute(sql, (enrollment_id, enrollment_id))
             row = cur.fetchone()
             return (row["recency_days"] or 0, row["miss_streak_days"] or 0)
 
@@ -358,9 +383,10 @@ class MySQLRiskRepository:
     ) -> None:
         # 축별 기여도·최대사유를 features JSON에 함께 적재(DDL 불필요, JSON 컬럼 재사용).
         # contributions는 dict라 JSON 문자열로 직렬화 후 CAST - Java churn 도메인이 이 컬럼을 read.
+        # method는 실 스키마 ENUM 대문자('RULE'/'COX').
         sql = """
             INSERT INTO dropout_risk (enrollment_id, computed_at, risk_score, method, features)
-            VALUES (%s, NOW(), %s, 'rule',
+            VALUES (%s, NOW(), %s, 'RULE',
                     JSON_OBJECT('label', %s,
                                 'top_reason', %s,
                                 'contributions', CAST(%s AS JSON)))
@@ -370,36 +396,33 @@ class MySQLRiskRepository:
 
 
 class MySQLWeeklyProgressRepository:
-    """⚠️ 야간 리플로우용 - 스키마 확정 전 추정 쿼리. DBA 확정되면 여기만 수정."""
+    """야간 리플로우용 - Frozen Zone(locked=0 필터)을 쿼리 단에서 강제한다."""
 
     def get_cumulative_slip_minutes(self, enrollment_id: str) -> int:
         sql = """
             SELECT COALESCE(SUM(planned_min - actual_min), 0) AS slip
             FROM daily_achievement
-            WHERE enrollment_id = %s AND achieved = FALSE
-              AND date >= DATE_SUB(CURDATE(), INTERVAL 1 WEEK)
+            WHERE enrollment_id = %s AND achieved = 0
+              AND achieved_date >= DATE_SUB(CURDATE(), INTERVAL 1 WEEK)
         """
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql, (enrollment_id,))
             return cur.fetchone()["slip"] or 0
 
     def get_weekly_average_minutes(self, enrollment_id: str) -> int:
-        sql = """
-            SELECT COALESCE(AVG(planned_min), 0) * 7 AS weekly_avg
-            FROM daily_achievement
-            WHERE enrollment_id = %s
-        """
+        sql = "SELECT COALESCE(AVG(planned_min), 0) * 7 AS weekly_avg FROM daily_achievement WHERE enrollment_id = %s"
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql, (enrollment_id,))
             return int(cur.fetchone()["weekly_avg"] or 0)
 
     def get_remaining_lessons_this_week(self, enrollment_id: str) -> list[dict]:
         sql = """
-            SELECT l.id, l.expected_duration_min AS duration_min
+            SELECT l.id, l.duration_seconds / 60 AS duration_min
             FROM schedule_slot ss
             JOIN weekly_schedule ws ON ws.id = ss.weekly_schedule_id
-            JOIN lecture l ON l.id = ss.lecture_id
-            WHERE ws.enrollment_id = %s AND ws.is_active = TRUE AND ss.status = 'planned'
+            JOIN lesson l ON l.id = ss.lesson_id
+            WHERE ws.enrollment_id = %s AND ss.status = 'PLANNED'
+              AND ws.locked = 0
               AND ss.plan_date >= CURDATE()
               AND YEARWEEK(ss.plan_date, 1) = YEARWEEK(CURDATE(), 1)
         """
@@ -408,14 +431,13 @@ class MySQLWeeklyProgressRepository:
             return cur.fetchall()
 
     def get_remaining_days_this_week(self, enrollment_id: str) -> int:
-        # 이번 주 일요일 기준 오늘 이후 남은 일수 (Frozen Zone: 오늘은 이미 확정이므로 내일부터 카운트)
         sql = "SELECT 7 - WEEKDAY(CURDATE()) - 1 AS remaining_days"
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql)
             return max(cur.fetchone()["remaining_days"], 0)
 
     def get_daily_cap_minutes(self, enrollment_id: str) -> int:
-        # 하루 상한은 student_capacity(학생단위) - enrollment_onboarding.daily_cap_min은 V3.1.8에서 삭제됨.
+        # 다중코스 cap 정책: enrollment 단위가 아니라 student_capacity(학생=member 단위)
         sql = """
             SELECT sc.daily_cap_min
             FROM student_capacity sc
@@ -425,21 +447,14 @@ class MySQLWeeklyProgressRepository:
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql, (enrollment_id,))
             row = cur.fetchone()
-            return row["daily_cap_min"] if row and row["daily_cap_min"] is not None else 60  # 폴백 기본값
+            return row["daily_cap_min"] if row and row["daily_cap_min"] else 60  # 폴백 기본값
 
     def save_day_assignment(self, enrollment_id: str, assignment: dict) -> None:
-        # write 범위를 get_remaining_lessons_this_week(read)와 정확히 동일하게 제한한다:
-        # status='planned' + 오늘 이후 + 이번 주(YEARWEEK). 이 필터가 없으면 같은 lecture_id가
-        # 지난 주차/이전 스케줄에도 있을 때 그것까지 덮어써서 Frozen Zone(지나간 확정분)을 침범함.
         sql = """
             UPDATE schedule_slot ss
             JOIN weekly_schedule ws ON ws.id = ss.weekly_schedule_id
             SET ss.plan_date = DATE_ADD(CURDATE(), INTERVAL %s + 1 DAY)
-            WHERE ws.enrollment_id = %s AND ss.lecture_id = %s
-              AND ws.is_active = TRUE
-              AND ss.status = 'planned'
-              AND ss.plan_date >= CURDATE()
-              AND YEARWEEK(ss.plan_date, 1) = YEARWEEK(CURDATE(), 1)
+            WHERE ws.enrollment_id = %s AND ws.locked = 0 AND ss.lesson_id = %s
         """
         with get_connection() as conn, conn.cursor() as cur:
             for lesson_id, day_offset in assignment.items():
