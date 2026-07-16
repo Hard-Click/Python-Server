@@ -18,9 +18,7 @@ pip install -r requirements.txt
 
 ## 테스트
 ```bash
-python test_scheduler.py
-python review/fsrs_review.py
-python dropout/rule_based_risk.py
+pytest tests/    # domain/application 로직 (DB 불필요)
 ```
 
 ## 설계 배경
