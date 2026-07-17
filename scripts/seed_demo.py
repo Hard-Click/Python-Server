@@ -1,15 +1,23 @@
 """발표 데모용 페르소나 시더 (hardclick_db 전용).
 
-빈 데모 DB(hardclick_db)에 베이스 픽스처 1코스 + 4페르소나(박모범/이눈치/최밀림/정위험)를
-심고, **검증된 순수 도메인 로직**(CP-SAT 스케줄러 / FSRS 복습 / 규칙기반 이탈위험)을 직접
-호출해 산출물(weekly_schedule·schedule_slot·review_card·review_log·dropout_risk)을 실제
-스키마 테이블에 기록한다. 깨진 infrastructure/repositories.py(추정 스키마)는 거치지 않는다.
+데모 DB에 베이스 픽스처 1코스 + 12페르소나를 심고, **검증된 순수 도메인 로직**(CP-SAT
+스케줄러 / FSRS 복습 / 규칙기반 이탈위험)을 직접 호출해 산출물(weekly_schedule·
+schedule_slot·review_card·review_log·dropout_risk)을 실제 스키마 테이블에 기록한다.
+깨진 infrastructure/repositories.py(추정 스키마)는 거치지 않는다.
+
+페르소나 구성:
+  - 9201~9204 박모범/이눈치/최밀림/정위험 — 스케줄러·FSRS 서사용(앞 2인은 위험군 아님).
+  - 9205~9212 위험군 8인 — 이탈관리 대시보드 목록용. 이게 없으면 목록이 2줄로 휑하다.
+  → 목록(risk>=0.4) 노출 10명 = HIGH 5 / MEDIUM 5.
 
 김첫날(콜드스타트)은 발표 당일 라이브 가입이라 시딩하지 않는다.
 
 실행 (Python-Server 디렉토리에서):
   DB_HOST=127.0.0.1 DB_USER=Hard-Click DB_PASSWORD=Hard-Click DB_NAME=hardclick_db \
     python -m scripts.seed_demo
+
+  # 발표 직전: 날짜 앵커를 발표일로 옮겨 재시딩(미지정 시 실행일 기준)
+  SEED_TODAY=2026-07-27 DB_HOST=... python -m scripts.seed_demo
 """
 import json
 import os
@@ -26,12 +34,17 @@ from domain.scheduler import (
 from domain.review import review_lesson, quiz_score_to_grade
 from domain.risk import compute_risk_breakdown
 
-TODAY = date(2026, 7, 14)
-TODAY_DT = datetime(2026, 7, 14, 9, 0, tzinfo=timezone.utc)
+# 데모 기준일 — 활동이력·스케줄·복습 날짜가 전부 여기서 파생된다.
+# 미지정 시 실행일. 시드가 과거에 박히면 "오늘 할 일/이번주" 화면이 비므로,
+# 발표 직전 재시딩 때 SEED_TODAY=2026-07-27 처럼 앵커를 옮긴다.
+_SEED_TODAY = os.environ.get("SEED_TODAY")
+TODAY = date.fromisoformat(_SEED_TODAY) if _SEED_TODAY else date.today()
+TODAY_DT = datetime(TODAY.year, TODAY.month, TODAY.day, 9, 0, tzinfo=timezone.utc)
 
 # ID 대역 (데모 전용, 재실행 시 이 대역만 지움)
 INSTRUCTOR_ID = 9200
-PERSONA_IDS = [9201, 9202, 9203, 9204]
+# 9201~9204=서사용 4인(박모범/이눈치/최밀림/정위험), 9205~9212=이탈관리 목록 채우기용 위험군.
+PERSONA_IDS = [9201, 9202, 9203, 9204, 9205, 9206, 9207, 9208, 9209, 9210, 9211, 9212]
 LESSON_COUNT = 10
 EXPECTED_MIN = 40                       # 강사 추정 강의시간(분)
 EXPECTED_SEC = EXPECTED_MIN * 60
@@ -59,6 +72,43 @@ PERSONAS = {
                daily_cap=60, rest_days=0b0000011, completed=3, actual_sec=4200,
                quiz=[48, 52, 45, 40, 55], grade=7,
                recency=22, miss_streak=20, dropout=True),
+
+    # ── 이탈관리 대시보드 목록 채우기용 위험군 (9205~9212) ──
+    # 위 4인은 스케줄러/FSRS 서사용이라 위험군이 2명뿐 → 관리자 화면이 2줄로 휑해진다.
+    # recency/miss_streak/quiz는 domain.risk.compute_risk_breakdown 을 직접 돌려 등급을 맞춘 값
+    # (계산 결과는 주석의 점수). recency가 12일을 넘으면 사실상 HIGH로 떨어진다.
+    9205: dict(name="정하늘", username="p_risk1", enrolled_ago=60, target_weeks=12,
+               daily_cap=90, rest_days=0b0000001, completed=2, actual_sec=4200,
+               quiz=[30, 28, 32, 29, 31], grade=7,
+               recency=21, miss_streak=21, dropout=True),      # ≈0.925 HIGH
+    9206: dict(name="김민수", username="p_risk2", enrolled_ago=55, target_weeks=12,
+               daily_cap=90, rest_days=0b0000001, completed=3, actual_sec=3900,
+               quiz=[38, 35, 40, 36, 41], grade=6,
+               recency=15, miss_streak=12, dropout=True),      # ≈0.905 HIGH
+    9207: dict(name="강도윤", username="p_risk3", enrolled_ago=50, target_weeks=10,
+               daily_cap=120, rest_days=0b0000001, completed=3, actual_sec=3600,
+               quiz=[45, 43, 47, 44, 46], grade=6,
+               recency=14, miss_streak=14, dropout=False),     # ≈0.887 HIGH
+    9208: dict(name="이서연", username="p_risk4", enrolled_ago=45, target_weeks=10,
+               daily_cap=120, rest_days=0b0000001, completed=4, actual_sec=3300,
+               quiz=[55, 53, 57, 54, 56], grade=5,
+               recency=18, miss_streak=10, dropout=False),     # ≈0.863 HIGH
+    9209: dict(name="한예린", username="p_mid1", enrolled_ago=40, target_weeks=10,
+               daily_cap=120, rest_days=0b0000001, completed=4, actual_sec=3000,
+               quiz=[68, 66, 70, 67, 69], grade=4,
+               recency=10, miss_streak=6, dropout=False),      # ≈0.659 MEDIUM
+    9210: dict(name="배준호", username="p_mid2", enrolled_ago=38, target_weeks=10,
+               daily_cap=120, rest_days=0b0000001, completed=4, actual_sec=3000,
+               quiz=[60, 58, 62, 59, 61], grade=5,
+               recency=5, miss_streak=7, dropout=False),       # ≈0.561 MEDIUM
+    9211: dict(name="박지훈", username="p_mid3", enrolled_ago=35, target_weeks=10,
+               daily_cap=120, rest_days=0b0000001, completed=5, actual_sec=2880,
+               quiz=[41, 39, 43, 40, 42], grade=5,
+               recency=2, miss_streak=7, dropout=False),       # ≈0.512 MEDIUM
+    9212: dict(name="윤지아", username="p_mid4", enrolled_ago=35, target_weeks=10,
+               daily_cap=120, rest_days=0b0000001, completed=5, actual_sec=2880,
+               quiz=[66, 64, 68, 65, 67], grade=4,
+               recency=2, miss_streak=8, dropout=False),       # ≈0.449 MEDIUM
 }
 
 
@@ -335,6 +385,25 @@ class Seeder:
         # ── 스케줄 (CP-SAT) ──
         num_weeks = compute_num_weeks(TODAY, enrolled_at, cfg["target_weeks"], None)
         adjusted = max(1, round(EXPECTED_MIN * coeff))
+        monday = TODAY - timedelta(days=TODAY.weekday())
+
+        # ── 완료분을 과거 DONE 슬롯으로 백필 ──
+        # forward 스케줄에는 remaining(미완료)만 들어가므로, 이것만 심으면 BE의
+        # progressRate(= DONE 슬롯 / 전체 슬롯)가 모든 학생에게 0으로 나온다.
+        # 완료 강의를 지난 주차 슬롯(DONE·locked)으로 남겨 진도율이 페르소나별로 갈리게 한다.
+        if completed:
+            weeks_back = max(1, -(-len(completed) // study_days))  # ceil division
+            past_ws_id = self.x("""INSERT INTO weekly_schedule
+                (enrollment_id, week_no, generated_at, reflow_reason, locked, effective_from)
+                VALUES (%s,%s,%s,%s,1,%s)""",
+                (enrollment_id, -1, dt_str(TODAY_DT), "완료분 기록(데모 시드)",
+                 dt_str(monday - timedelta(weeks=weeks_back))[:10]))
+            for i, lid in enumerate(completed):
+                done_date = monday - timedelta(days=len(completed) - i)
+                self.x("""INSERT INTO schedule_slot
+                    (weekly_schedule_id, lesson_id, plan_date, start_time, planned_min, status)
+                    VALUES (%s,%s,%s,'19:00:00',%s,'DONE')""",
+                    (past_ws_id, lid, dt_str(done_date)[:10], adjusted))
         cpsat_lessons = [{"id": lid, "course_id": course_id, "duration_min": adjusted,
                           "deadline_week": num_weeks - 1} for lid in remaining]
         weekly_avail = daily_planned * study_days
@@ -364,7 +433,6 @@ class Seeder:
             by_week = {}
             for lid, wk in assignment.items():
                 by_week.setdefault(wk, []).append(lid)
-            monday = TODAY - timedelta(days=TODAY.weekday())
             for wk, lids in sorted(by_week.items()):
                 ws_id = self.x("""INSERT INTO weekly_schedule
                     (enrollment_id, week_no, generated_at, reflow_reason, locked, effective_from)
