@@ -49,7 +49,10 @@ LESSON_COUNT = 10
 EXPECTED_MIN = 40                       # 강사 추정 강의시간(분)
 EXPECTED_SEC = EXPECTED_MIN * 60
 
-PW_HASH = "$2a$10$/mT8RjKyRgPgwQ8WT16QJeqT7HesyqOEErEOEN.BhbSqcg6xS4Vmm"  # Test1234!
+# 페르소나 공통 로그인 비번 = Flown2026!
+# (이전 해시는 평문이 팀 내에 안 남아 있어 데모 때 아무도 로그인하지 못했다. 재시딩할 때마다
+#  비번을 수동 UPDATE로 되맞추는 일이 없도록, 알려진 값의 해시를 시더가 직접 심는다.)
+PW_HASH = "$2a$10$jyOD5ilYEfVfy2U91g5kUelb.eqh36wqv/yx928qAywPgZURHpzI."  # Flown2026!
 
 # ── 페르소나 정의 ────────────────────────────────────────────────
 # rest_days: 비트마스크(bit0=일 … bit6=토). completed: 완료 강의 수(나머지는 스케줄 대상).
