@@ -172,10 +172,14 @@ class Seeder:
             rc_ids = [r["id"] for r in self.cur.fetchall()]
             del_in("review_log", "card_id", rc_ids)
             del_in("review_card", "enrollment_id", enr_ids)
-            for t in ("daily_achievement", "dropout_risk", "dropout_event", "enrollment_onboarding", "student_availability"):
+            for t in ("daily_achievement", "dropout_risk", "dropout_event", "enrollment_onboarding"):
                 del_in(t, "enrollment_id", enr_ids)
         # member 기준
+        # student_availability: V3.2.3 에서 enrollment_id -> member_id 로 전환됨(학생 단위).
+        # 예전엔 enrollment_id 로 지웠는데, 첫 시딩은 enr_ids 가 비어 이 블록을 건너뛰어서
+        # 드러나지 않았고 재실행(멱등) 때만 1054 Unknown column 으로 터졌다.
         for t, col in (("enrollment", "member_id"), ("member_lesson_stat", "member_id"),
+                       ("student_availability", "member_id"),
                        ("student_capacity", "student_id"), ("student_diagnostic_score", "member_id"),
                        ("quiz_submission", "member_id")):
             self.cur.execute(f"DELETE FROM {t} WHERE {col} IN ({ids})")
