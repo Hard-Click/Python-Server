@@ -224,12 +224,14 @@ class Seeder:
              mid, cfg["target_weeks"], cfg["target_weeks"]))
         self.x("INSERT INTO enrollment_onboarding (enrollment_id, rest_days, onboarded_at) VALUES (%s,%s,%s)",
                (enrollment_id, cfg["rest_days"], dt_str(datetime.combine(enrolled_at, datetime.min.time()))))
-        self.x("INSERT INTO student_capacity (student_id, daily_cap_min) VALUES (%s,%s)", (mid, cfg["daily_cap"]))
-        # 가용시간: 학습일마다 저녁 19-22시
+        # V3.2.4: rest_days·onboarded_at는 student_capacity(학생 단위)로 이동됨. onboarded_at 채워 온보딩 완료로 인식시킴.
+        self.x("INSERT INTO student_capacity (student_id, daily_cap_min, rest_days, onboarded_at) VALUES (%s,%s,%s,%s)",
+               (mid, cfg["daily_cap"], cfg["rest_days"], dt_str(datetime.combine(enrolled_at, datetime.min.time()))))
+        # 가용시간: 학습일마다 저녁 19-22시. V3.2.3: student_availability는 enrollment_id → member_id(학생 단위).
         for dow in range(7):
             if not (cfg["rest_days"] >> dow) & 1:
-                self.x("INSERT INTO student_availability (enrollment_id, day_of_week, start_time, end_time) VALUES (%s,%s,'19:00:00','22:00:00')",
-                       (enrollment_id, dow))
+                self.x("INSERT INTO student_availability (member_id, day_of_week, start_time, end_time) VALUES (%s,%s,'19:00:00','22:00:00')",
+                       (mid, dow))
         self.x("INSERT INTO student_diagnostic_score (member_id, course_id, grade, exam_date) VALUES (%s,%s,%s,%s)",
                (mid, course_id, cfg["grade"], dt_str(TODAY - timedelta(days=30))[:10]))
 
