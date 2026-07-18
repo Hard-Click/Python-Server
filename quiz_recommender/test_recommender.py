@@ -298,3 +298,24 @@ def test_times_key_missing_is_tolerated(time_env, monkeypatch):
     monkeypatch.setattr(personalize.db, "get_answer_rounds", lambda sid: rounds)
     picked = personalize.personalized_recommend(7, 100, 1, 2)
     assert picked[0] == 302
+
+
+def test_zero_median_disables_time_signal(time_env, monkeypatch):
+    """중앙값 0(0초 답 과반 — 백엔드는 0초를 유효값으로 저장) → 신호 끔.
+    threshold=0이면 측정된 전부가 '느림'으로 반전되는 퇴화 케이스 방어."""
+    rounds = [
+        # times [0,0,90] → 중앙값 0 → 신호 꺼짐 → 맞힌 301은 기존처럼 제외돼야 함
+        {"section_id": 11, "answers": [(301, True), (4, True), (5, False)],
+         "times": {301: 0, 4: 0, 5: 90}},
+    ]
+    monkeypatch.setattr(personalize.db, "get_answer_rounds", lambda sid: rounds)
+    assert personalize._slow_threshold(rounds) is None
+    picked = personalize.personalized_recommend(7, 100, 1, 3)
+    assert 301 not in picked, "신호 꺼짐 → 맞힌 문제는 기존 동작대로 제외"
+
+
+def test_even_sample_uses_true_median():
+    """짝수 표본은 진짜 중앙값(두 가운데 값 평균) 기준: [10,20,30,40] → 25 × 1.5 = 37.5."""
+    rounds = [{"section_id": 1, "answers": [(1, True), (2, True), (3, True), (4, True)],
+               "times": {1: 10, 2: 20, 3: 30, 4: 40}}]
+    assert personalize._slow_threshold(rounds) == 37.5

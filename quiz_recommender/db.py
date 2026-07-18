@@ -48,7 +48,9 @@ def get_answer_rounds(student_id: int) -> list[dict]:
         with conn.cursor() as cur:
             try:
                 cur.execute(sql.format(time_col=", qsa.time_spent_seconds"), (student_id,))
-            except pymysql.err.OperationalError as e:
+            # 1054는 현재 pymysql에선 OperationalError지만 의미상 ProgrammingError 계열 —
+            # 라이브러리가 매핑을 바꿔도 폴백이 살아있도록 둘 다 잡는다.
+            except (pymysql.err.OperationalError, pymysql.err.ProgrammingError) as e:
                 if e.args and e.args[0] == 1054:  # Unknown column → 마이그레이션 전 환경
                     cur.execute(sql.format(time_col=""), (student_id,))
                 else:
