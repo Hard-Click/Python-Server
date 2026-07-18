@@ -55,6 +55,25 @@ DEMO_VIDEOS = [
     ("https://archive.org/download/Sintel/sintel-2048-surround_512kb.mp4", 888),
     ("https://archive.org/download/ElephantsDream/ed_1024_512kb.mp4", 654),
 ]
+
+# 코스 썸네일(공부/과목 테마, Unsplash HTTPS·핫링크 허용). 200 확인된 사진만 사용.
+def _thumb(pid):
+    return f"https://images.unsplash.com/photo-{pid}?w=800&h=450&fit=crop"
+
+DEMO_COURSE_THUMB = _thumb("1456513080510-7bf3a84b82f8")   # 노트북+공부 (데모 코스)
+# 카탈로그 강사 순서와 1:1 (국어/수학/영어/한국사/국어/수학/영어/사회/과학/국어)
+CATALOG_THUMBS = [
+    _thumb("1481627834876-b7833e8f5570"),   # 도서관 책 (국어 비문학)
+    _thumb("1509228468518-180dd4864904"),   # 수학 칠판 (수1·2)
+    _thumb("1513258496099-48168024aec0"),   # 영어 글자 (어휘)
+    _thumb("1596495578065-6e0763fa1178"),   # 지구본 (한국사)
+    _thumb("1497633762265-9d179a990aa6"),   # 책 더미 (국어 문학)
+    _thumb("1434030216411-0b793f4b4173"),   # 노트+펜 (수학 선택)
+    _thumb("1503676260728-1c00da094a0b"),   # 책상 공부 (영어 구문)
+    _thumb("1524995997946-a1c2e315a42f"),   # 온라인 학습 (사탐)
+    _thumb("1594322436404-5a0526db4d13"),   # 과학 실험 (과탐)
+    _thumb("1546410531-bb4caa6b424d"),      # 시험지 (화작)
+]
 LESSON_COUNT = 10
 EXPECTED_MIN = 40                       # 강사 추정 강의시간(분)
 EXPECTED_SEC = EXPECTED_MIN * 60
@@ -283,9 +302,9 @@ class Seeder:
         """강사 + 코스1 + 섹션1 + lesson N + 선수관계 + 정책 + 퀴즈(강의당 1) + fsrs global."""
         self.member(INSTRUCTOR_ID, "김강사데모", "demo_inst", "INSTRUCTOR")
         course_id = self.x("""INSERT INTO course
-            (author_id, price, title, created_at, description, price_type, status, subject)
-            VALUES (%s, 0, %s, %s, %s, 'FREE', 'PUBLISHED', %s)""",
-            (INSTRUCTOR_ID, "수능 국어 완성 (데모)", dt_str(TODAY_DT), "데모용 코스", "국어"))
+            (author_id, price, title, created_at, description, price_type, status, subject, thumbnail_url)
+            VALUES (%s, 0, %s, %s, %s, 'FREE', 'PUBLISHED', %s, %s)""",
+            (INSTRUCTOR_ID, "수능 국어 완성 (데모)", dt_str(TODAY_DT), "데모용 코스", "국어", DEMO_COURSE_THUMB))
         section_id = self.x("INSERT INTO course_section (order_index, title, course_id) VALUES (1,%s,%s)",
                             ("전체", course_id))
         lessons = []
@@ -347,10 +366,10 @@ class Seeder:
                 (mid, c["name"], f"{uname}@flown.demo", uname, PW_HASH,
                  c["career"], c["intro"], c["one_line"], dt_str(TODAY_DT)))
             course_id = self.x("""INSERT INTO course
-                (author_id, price, title, created_at, description, price_type, status, subject)
-                VALUES (%s, 0, %s, %s, %s, 'FREE', 'PUBLISHED', %s)""",
+                (author_id, price, title, created_at, description, price_type, status, subject, thumbnail_url)
+                VALUES (%s, 0, %s, %s, %s, 'FREE', 'PUBLISHED', %s, %s)""",
                 (mid, c["course"], dt_str(TODAY_DT),
-                 f"{c['name']} 강사의 {c['course']}. {c['intro']}", c["subject"]))
+                 f"{c['name']} 강사의 {c['course']}. {c['intro']}", c["subject"], CATALOG_THUMBS[idx]))
             section_id = self.x("INSERT INTO course_section (order_index, title, course_id) VALUES (1,%s,%s)",
                                 ("전체", course_id))
             for li in range(1, 5):   # 강의 4개, 재생되는 영상 부여
