@@ -8,7 +8,9 @@ schedule_slot·review_card·review_log·dropout_risk)을 실제 스키마 테이
 페르소나 구성:
   - 9201~9204 박모범/이눈치/최밀림/정위험 — 스케줄러·FSRS 서사용(앞 2인은 위험군 아님).
   - 9205~9212 위험군 8인 — 이탈관리 대시보드 목록용. 이게 없으면 목록이 2줄로 휑하다.
-  → 목록(risk>=0.4) 노출 10명 = HIGH 5 / MEDIUM 5.
+  - 9213~9214 qa_full/qa_edge — FE UI 확인 전용(서사 무관·churn 목록 비노출). 페르소나
+    계정을 FE가 만지면 최근접속 등이 오염되므로 QA는 반드시 이 둘로.
+  → 목록(risk>=0.4) 노출 10명 = HIGH 5 / MEDIUM 5 (QA 2계정은 LOW라 제외).
 
 김첫날(콜드스타트)은 발표 당일 라이브 가입이라 시딩하지 않는다.
 
@@ -67,7 +69,10 @@ TODAY_DT = datetime(TODAY.year, TODAY.month, TODAY.day, 9, 0, tzinfo=timezone.ut
 # ID 대역 (데모 전용, 재실행 시 이 대역만 지움)
 INSTRUCTOR_ID = 9200
 # 9201~9204=서사용 4인(박모범/이눈치/최밀림/정위험), 9205~9212=이탈관리 목록 채우기용 위험군.
-PERSONA_IDS = [9201, 9202, 9203, 9204, 9205, 9206, 9207, 9208, 9209, 9210, 9211, 9212]
+# 9213~9214=FE QA 전용(페르소나 아님) — FE가 페르소나 계정에 로그인하면 최근접속·이력이
+# 오염되므로 UI 확인은 이 둘로만 한다. 위험도 LOW라 관리자 churn 목록(>=0.4)에 안 뜬다.
+PERSONA_IDS = [9201, 9202, 9203, 9204, 9205, 9206, 9207, 9208, 9209, 9210, 9211, 9212,
+               9213, 9214]
 # 카탈로그(강의 둘러보기) 채우기용 강사 10명 — 각자 코스 1개 + 재생되는 영상 강의 4개.
 CATALOG_INSTRUCTOR_IDS = list(range(9220, 9230))
 
@@ -194,6 +199,21 @@ PERSONAS = {
                daily_cap=120, rest_days=0b0000001, completed={"kor": 5}, actual_sec=2880,
                quiz=[66, 64, 68, 65, 67],
                recency=2, miss_streak=8, dropout=False),       # ≈0.449 MEDIUM
+
+    # ── FE QA 전용 (9213~9214) — 페르소나 서사와 완전 분리, 마음껏 로그인/클릭해도 됨 ──
+    # qa_full: 박모범과 같은 "꽉 찬" 데이터(4코스·완료 다수·스케줄·복습카드) — 일반 학생 UI 확인용.
+    # qa_edge: 정위험과 같은 capacity/target(스케줄 INFEASIBLE + 알림 발생)이지만 활동신호는
+    #   정상(recency 1·streak 0 → risk≈0.16 LOW)이라 churn 목록엔 안 뜸 — 빈 상태·경고 UI 확인용.
+    9213: dict(name="큐에이풀", username="qa_full", enrolled_ago=60, target_weeks=12,
+               daily_cap=120, rest_days=0b0000001,
+               completed={"kor": 6, "math1": 4, "math2": 2, "soc": 5},
+               actual_sec=2160, quiz=[95, 92, 98, 90, 93],
+               recency=1, miss_streak=0, dropout=False),       # ≈0.048 LOW (목록 비노출)
+    9214: dict(name="큐에이엣지", username="qa_edge", enrolled_ago=50, target_weeks=6,
+               daily_cap=60, rest_days=0b0000011,
+               completed={"kor": 2, "math1": 1, "math2": 0, "soc": 1},
+               actual_sec=4200, quiz=[48, 52, 45, 40, 55],
+               recency=1, miss_streak=0, dropout=False),       # ≈0.16 LOW (목록 비노출)
 }
 
 # ── 카탈로그 강사/코스 (둘러보기 화면 채우기용, 학생 미수강) ───────────────
