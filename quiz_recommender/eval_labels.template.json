@@ -1,0 +1,53 @@
+{
+  "_readme": [
+    "추천 품질 평가 라벨. 이 파일을 eval_labels.json 으로 복사해 20~30개 채운 뒤 eval_metrics.py 실행.",
+    "",
+    "채우는 법:",
+    "1) queries: 원문제(=복습 대상, 학생이 틀린 문제)마다 한 항목.",
+    "   - relevant_ids: 그 문제와 '진짜 유사한'(같은 개념/유형) question_id 목록. 사람이 판단해 라벨.",
+    "     type 컬럼은 실제 스키마에 없으므로 section_id + 눈으로 확인해서 정한다.",
+    "2) students: 시나리오에 등장하는 학생마다 한 항목.",
+    "   - wrong_question_ids: quiz_submission_answer 에서 is_correct=0 인 question_id (실데이터에서 추출).",
+    "   - weak_sections:   그 오답 문제들의 section_id 집합 (= 약한 개념). 오답에서 유도.",
+    "3) scenarios: (학생 × 원문제) 조합. 실제 추천이 일어나는 상황들.",
+    "",
+    "지표: recall@k/MRR(관련성) + weak_hit@k(약점 적중). 베이스라인 vs 개인화 비교.",
+    "id 는 전부 실제 quiz_question.question_id (= 추천기 problem_id, 같은 id 공간).",
+    "아래 값은 형식 예시일 뿐 — 실제 id 로 교체할 것."
+  ],
+
+  "k": 2,
+
+  "queries": {
+    "101": {
+      "course_id": 5,
+      "relevant_ids": [102, 108],
+      "note": "이차방정식 근의공식 — 같은 유형: 102, 108"
+    },
+    "140": {
+      "course_id": 5,
+      "relevant_ids": [141, 145],
+      "note": "확률 조건부 — 같은 유형: 141, 145"
+    }
+  },
+
+  "students": {
+    "9001": {
+      "wrong_question_ids": [108, 140],
+      "weak_sections": [12],
+      "solved_correct_ids": [102],
+      "note": "이 학생은 section 12(이차방정식)에서 오답이 몰림"
+    },
+    "9002": {
+      "wrong_question_ids": [145],
+      "weak_sections": [20],
+      "solved_correct_ids": [],
+      "note": "section 20(확률) 약점"
+    }
+  },
+
+  "scenarios": [
+    { "student_id": 9001, "query_id": 101 },
+    { "student_id": 9002, "query_id": 140 }
+  ]
+}

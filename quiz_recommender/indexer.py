@@ -8,10 +8,13 @@
 import hashlib
 import json
 
-import db
-import embedding
-import preprocess
-import vector_store
+try:
+    from . import db, embedding, preprocess, vector_store
+except ImportError:
+    import db
+    import embedding
+    import preprocess
+    import vector_store
 
 
 def _content_hash(text: str, explanation: str | None, difficulty) -> str:
@@ -33,7 +36,7 @@ def _fetch_all_questions() -> list[dict]:
     # difficulty는 quiz_question에 컬럼 추가(마이그레이션) 후 채워진다.
     sql = """
         SELECT q.question_id, q.question_text, q.explanation, q.difficulty,
-               qz.course_id, qz.section_id
+               qz.course_id, qz.section_id, qz.instructor_id
         FROM quiz_question q
         JOIN quiz qz ON q.quiz_id = qz.quiz_id
     """
@@ -75,7 +78,10 @@ def reindex() -> dict:
 
 
 if __name__ == "__main__":
-    import notifier
+    try:
+        from . import notifier
+    except ImportError:
+        import notifier
     try:
         result = reindex()
         print(json.dumps(result, ensure_ascii=False))

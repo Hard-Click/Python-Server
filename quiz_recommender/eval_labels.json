@@ -1,0 +1,100 @@
+{
+  "_readme": [
+    "데모 평가셋 — sample_problems.json 의 실제 23문제(Qdrant 적재 완료) 기준.",
+    "relevant_ids 는 같은 type(파일에 명시) 기준으로 라벨링.",
+    "students[].rounds 는 제출 1건 단위 이력 — eval_offline.py 가 db.get_answer_rounds 를 이걸로 대체.",
+    "학생 프로필: 9301 TOP(인수분해 약점) / 9302 FLOOR(유리화 계속 틀림) / 9303 TOP(극한) /",
+    "9304 MID(근의공식) / 9305 BASE(신규) / 9306 교차 약점(유리화 계열 sec2+3)."
+  ],
+
+  "k": 2,
+
+  "queries": {
+    "101": { "course_id": 1, "relevant_ids": [102, 103, 104], "note": "이차방정식-인수분해" },
+    "103": { "course_id": 1, "relevant_ids": [101, 102, 104], "note": "이차방정식-인수분해" },
+    "111": { "course_id": 1, "relevant_ids": [112, 113], "note": "이차방정식-근의공식" },
+    "201": { "course_id": 1, "relevant_ids": [202, 203, 204], "note": "분모유리화" },
+    "202": { "course_id": 1, "relevant_ids": [201, 203, 204], "note": "분모유리화" },
+    "301": { "course_id": 1, "relevant_ids": [302, 303, 304], "note": "극한-인수분해" },
+    "311": { "course_id": 1, "relevant_ids": [312, 313], "note": "극한-유리화" },
+    "401": { "course_id": 1, "relevant_ids": [402], "note": "일차방정식" }
+  },
+
+  "students": {
+    "9301": {
+      "wrong_question_ids": [101, 103],
+      "weak_sections": [1],
+      "solved_correct_ids": [102, 111],
+      "note": "인수분해 약점, 102는 이미 맞힘(복습 제외 대상), 직전 라운드 전부 정답 → TOP",
+      "rounds": [
+        { "section_id": 1, "answers": [[102, 1], [111, 1]] },
+        { "section_id": 1, "answers": [[101, 0], [103, 0]] }
+      ]
+    },
+    "9302": {
+      "wrong_question_ids": [211, 201, 202],
+      "weak_sections": [2],
+      "solved_correct_ids": [213, 101, 102],
+      "note": "유리화 계열 계속 틀림 → FLOOR",
+      "rounds": [
+        { "section_id": 2, "answers": [[211, 0], [213, 1]] },
+        { "section_id": 2, "answers": [[201, 0], [202, 0]] },
+        { "section_id": 1, "answers": [[101, 1], [102, 1]] }
+      ]
+    },
+    "9303": {
+      "wrong_question_ids": [301, 311],
+      "weak_sections": [3],
+      "solved_correct_ids": [302, 303],
+      "note": "극한 직전 라운드 전부 정답 → TOP. 302/303은 이미 맞힘 — baseline 은 이걸 또 추천함",
+      "rounds": [
+        { "section_id": 3, "answers": [[302, 1], [303, 1]] },
+        { "section_id": 3, "answers": [[301, 0], [311, 0]] }
+      ]
+    },
+    "9304": {
+      "wrong_question_ids": [103, 111, 113],
+      "weak_sections": [1],
+      "solved_correct_ids": [101, 102, 104],
+      "note": "TOP 찍고 틀림 → MID (중+상 믹스)",
+      "rounds": [
+        { "section_id": 1, "answers": [[101, 1], [102, 1]] },
+        { "section_id": 1, "answers": [[103, 0], [104, 1]] },
+        { "section_id": 1, "answers": [[111, 0], [113, 0]] }
+      ]
+    },
+    "9305": {
+      "wrong_question_ids": [401],
+      "weak_sections": [4],
+      "solved_correct_ids": [],
+      "note": "신규 학생, 첫 오답 → BASE(콜드스타트)",
+      "rounds": [
+        { "section_id": 4, "answers": [[401, 0]] }
+      ]
+    },
+    "9306": {
+      "wrong_question_ids": [311, 312, 202],
+      "weak_sections": [2, 3],
+      "solved_correct_ids": [211],
+      "note": "유리화 계열 교차 약점 (분모유리화 sec2 + 극한-유리화 sec3)",
+      "rounds": [
+        { "section_id": 3, "answers": [[311, 0], [312, 0]] },
+        { "section_id": 2, "answers": [[202, 0], [211, 1]] }
+      ]
+    }
+  },
+
+  "scenarios": [
+    { "student_id": 9301, "query_id": 101 },
+    { "student_id": 9301, "query_id": 103 },
+    { "student_id": 9302, "query_id": 201 },
+    { "student_id": 9302, "query_id": 202 },
+    { "student_id": 9303, "query_id": 301 },
+    { "student_id": 9303, "query_id": 311 },
+    { "student_id": 9304, "query_id": 111 },
+    { "student_id": 9304, "query_id": 103 },
+    { "student_id": 9305, "query_id": 401 },
+    { "student_id": 9306, "query_id": 202 },
+    { "student_id": 9306, "query_id": 311 }
+  ]
+}
