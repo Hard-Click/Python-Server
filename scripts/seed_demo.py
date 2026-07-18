@@ -39,23 +39,22 @@ try:
 except ImportError:
     from math_quiz_bank import MATH_QUIZ_BANK
 
-# 메가스터디 썸네일(640x360 JPEG base64) — build_demo_thumbnails.py 가 생성. 없으면 Unsplash 폴백.
+# 메가스터디 썸네일 → S3 업로드본 URL. next/image 는 data URI 불가·public S3 URL만 허용.
+# build_demo_thumbnails.py 가 scripts/demo_thumbs/*.jpg + 키 매핑 생성. S3_BUCKET env 없으면 Unsplash 폴백.
 try:
-    from scripts.demo_thumbnails import THUMBS as _THUMBS
+    from scripts.demo_thumbnails import S3_PREFIX, DEMO_THUMB_KEYS, CATALOG_THUMB_KEYS
 except Exception:
     try:
-        from demo_thumbnails import THUMBS as _THUMBS
+        from demo_thumbnails import S3_PREFIX, DEMO_THUMB_KEYS, CATALOG_THUMB_KEYS
     except Exception:
-        _THUMBS = {}
-# 데모 4코스 → 원본 파일명 매핑 (수학 2코스=칠판 강사·순열조합, 국어=강의캡처, 사탐=강사)
-_DEMO_THUMB_FILES = {
-    "kor":   "스크린샷 2026-07-18 225217.png",
-    "math1": "수학 강사.png",
-    "math2": "스크린샷 2026-07-18 225148.png",
-    "soc":   "수학강사.png",
-}
-# 카탈로그(둘러보기) 코스용 = 데모에 안 쓴 나머지 이미지들
-_CATALOG_THUMB_URIS = [v for k, v in _THUMBS.items() if k not in _DEMO_THUMB_FILES.values()]
+        S3_PREFIX, DEMO_THUMB_KEYS, CATALOG_THUMB_KEYS = "demo-thumbs", {}, []
+_S3_BUCKET = os.environ.get("S3_BUCKET")
+
+
+def _s3_thumb(key):
+    if _S3_BUCKET and key:
+        return f"https://{_S3_BUCKET}.s3.ap-northeast-2.amazonaws.com/{S3_PREFIX}/{key}"
+    return None
 
 # 데모 기준일 — 활동이력·스케줄·복습 날짜가 전부 여기서 파생된다.
 # 미지정 시 실행일. 시드가 과거에 박히면 "오늘 할 일/이번주" 화면이 비므로,
@@ -391,7 +390,7 @@ class Seeder:
 
     def _build_course(self, spec):
         """코스 1개 = 강의 N + 선수관계 + 정책 + 강의당 퀴즈1. bank 있으면 섹션=강의로 실문제 심음."""
-        thumbnail = _THUMBS.get(_DEMO_THUMB_FILES.get(spec["key"], "")) or spec["thumb"]
+        thumbnail = _s3_thumb(DEMO_THUMB_KEYS.get(spec["key"])) or spec["thumb"]
         course_id = self.x("""INSERT INTO course
             (author_id, price, title, created_at, description, price_type, status, subject, thumbnail_url)
             VALUES (%s, 0, %s, %s, %s, 'FREE', 'PUBLISHED', %s, %s)""",
@@ -458,7 +457,7 @@ class Seeder:
                 VALUES (%s,%s,%s,%s,%s,'INSTRUCTOR','ACTIVE', 0,0,0,1, %s,%s,%s,%s)""",
                 (mid, c["name"], f"{uname}@flown.demo", uname, PW_HASH,
                  c["career"], c["intro"], c["one_line"], dt_str(TODAY_DT)))
-            cthumb = _CATALOG_THUMB_URIS[idx % len(_CATALOG_THUMB_URIS)] if _CATALOG_THUMB_URIS else CATALOG_THUMBS[idx]
+            cthumb = (_s3_thumb(CATALOG_THUMB_KEYS[idx % len(CATALOG_THUMB_KEYS)]) if CATALOG_THUMB_KEYS else None) or CATALOG_THUMBS[idx]
             course_id = self.x("""INSERT INTO course
                 (author_id, price, title, created_at, description, price_type, status, subject, thumbnail_url)
                 VALUES (%s, 0, %s, %s, %s, 'FREE', 'PUBLISHED', %s, %s)""",
