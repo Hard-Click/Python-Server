@@ -171,6 +171,21 @@ class WrongAnswerRepository(Protocol):
         ...
 
 
+class EnrollmentQuizResolverPort(Protocol):
+    """FSRS 파이프라인 키(enrollment_id, lesson_id)를 추천 유스케이스 키(member_id, quiz_id)로 변환.
+    변환을 종호 배치가 아니라 여기(우리 인프라)에 두는 이유: enrollment/lesson_quiz_map 조회는
+    스키마 관심사라 컬럼명 바뀌어도 repositories.py 한 군데만 고치면 되게(CLAUDE.md 절대규칙)."""
+
+    def get_member_id(self, enrollment_id: int) -> int | None:
+        """enrollment_id -> 그 수강의 member_id. 없으면 None."""
+        ...
+
+    def get_latest_quiz_id(self, member_id: int, lesson_id: int) -> int | None:
+        """이 학생이 lesson에 매핑된 퀴즈(N:N lesson_quiz_map) 중 '가장 최근 제출한' quiz_id.
+        get_wrong_question_ids/get_latest_quiz_score의 '최신 제출' 의미와 일치. 제출 없으면 None."""
+        ...
+
+
 class ProblemRecommenderPort(Protocol):
     def get_similar_problems(self, student_id: int, problem_id: int, k: int = 2) -> list[int]:
         """유사문제 추천(BE quiz_recommender 계약). 반환 [원문제id, 유사id...] (result[0]=원문제).

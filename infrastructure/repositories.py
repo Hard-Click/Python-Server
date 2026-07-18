@@ -304,7 +304,7 @@ class MySQLQuizScoreRepository:
             FROM quiz_submission qs
             JOIN lesson_quiz_map lqm ON lqm.quiz_id = qs.quiz_id
             JOIN enrollment e ON e.member_id = qs.member_id
-            WHERE e.enrollment_id = %s AND lqm.lesson_id = %s
+            WHERE e.id = %s AND lqm.lesson_id = %s
             ORDER BY qs.submitted_at DESC
             LIMIT 1
         """
@@ -351,6 +351,33 @@ class MySQLWrongAnswerRepository:
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql, (student_id, quiz_id, student_id, quiz_id))
             return [row["question_id"] for row in cur.fetchall()]
+
+
+class MySQLEnrollmentQuizResolver:
+    """FSRS 파이프라인 키(enrollment_id, lesson_id) -> 추천 유스케이스 키(member_id, quiz_id) 변환.
+    종호 배치는 자기가 가진 enrollment_id/lesson_id만 넘기면 되고 매핑은 여기서 처리한다.
+    lesson↔quiz는 N:N(lesson_quiz_map)이라 '이 학생이 그 레슨 퀴즈 중 가장 최근 제출한 quiz'를 택함."""
+
+    def get_member_id(self, enrollment_id: str):
+        sql = "SELECT member_id FROM enrollment WHERE id = %s"
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(sql, (enrollment_id,))
+            row = cur.fetchone()
+            return row["member_id"] if row else None
+
+    def get_latest_quiz_id(self, member_id: str, lesson_id: str):
+        sql = """
+            SELECT qs.quiz_id
+            FROM quiz_submission qs
+            JOIN lesson_quiz_map lqm ON lqm.quiz_id = qs.quiz_id
+            WHERE qs.member_id = %s AND lqm.lesson_id = %s
+            ORDER BY qs.submitted_at DESC
+            LIMIT 1
+        """
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(sql, (member_id, lesson_id))
+            row = cur.fetchone()
+            return row["quiz_id"] if row else None
 
 
 class MySQLActivityRepository:

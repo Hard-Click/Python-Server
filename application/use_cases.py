@@ -21,6 +21,7 @@ from application.ports import (
     WeeklyProgressRepository, SubscriptionRepository, LessonProgressRepository,
     StudentNotificationRepository, ExperimentRepository,
     WrongAnswerRepository, ProblemRecommenderPort, CourseLearningPolicyRepository,
+    EnrollmentQuizResolverPort,
 )
 
 # 구독에 수능일이 아직 안 잡혀있는 경우(온보딩 미완료 등)의 폴백 상한 - 관리자 전역정책값
@@ -404,9 +405,25 @@ class RecommendSimilarProblemsUseCase:
     반환: {틀린 question_id: [유사 question_id, ...]} - 추천이 실제로 있는 문제만 담는다.
     """
 
-    def __init__(self, wrong_answer_repo: WrongAnswerRepository, recommender: ProblemRecommenderPort):
+    def __init__(self, wrong_answer_repo: WrongAnswerRepository, recommender: ProblemRecommenderPort,
+                 resolver: EnrollmentQuizResolverPort = None):
         self.wrong_answer_repo = wrong_answer_repo
         self.recommender = recommender
+        self.resolver = resolver  # execute_for_enrollment을 쓸 때만 필요(FSRS 파이프라인 진입점)
+
+    def execute_for_enrollment(self, enrollment_id: int, lesson_id: int, k: int = 2) -> dict[int, list[int]]:
+        """FSRS 파이프라인용 진입점: 종호가 가진 (enrollment_id, lesson_id)를 그대로 받아
+        내부에서 (member_id, quiz_id)로 변환한 뒤 execute를 호출한다. 변환에 필요한 값이 없으면
+        (알 수 없는 enrollment, 그 레슨 퀴즈 제출 이력 없음) 조용히 {} 반환 - 추천 없음으로 스킵."""
+        if self.resolver is None:
+            raise RuntimeError("execute_for_enrollment에는 EnrollmentQuizResolverPort 주입이 필요함.")
+        member_id = self.resolver.get_member_id(enrollment_id)
+        if member_id is None:
+            return {}
+        quiz_id = self.resolver.get_latest_quiz_id(member_id, lesson_id)
+        if quiz_id is None:
+            return {}
+        return self.execute(member_id, quiz_id, k)
 
     def execute(self, student_id: int, quiz_id: int, k: int = 2) -> dict[int, list[int]]:
         wrong_qids = self.wrong_answer_repo.get_wrong_question_ids(student_id, quiz_id)

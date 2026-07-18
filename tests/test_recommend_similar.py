@@ -70,3 +70,39 @@ def test_student_id_and_k_passed_through_per_contract():
     uc = RecommendSimilarProblemsUseCase(repo, rec)
     uc.execute(student_id=42, quiz_id=9, k=3)
     assert rec.calls == [(42, 101, 3)]
+
+
+class FakeResolver:
+    """(enrollment_id -> member_id), (member_id, lesson_id) -> quiz_id 매핑. 없으면 None."""
+    def __init__(self, members, quizzes):
+        self._members = members
+        self._quizzes = quizzes
+
+    def get_member_id(self, enrollment_id):
+        return self._members.get(enrollment_id)
+
+    def get_latest_quiz_id(self, member_id, lesson_id):
+        return self._quizzes.get((member_id, lesson_id))
+
+
+def test_execute_for_enrollment_resolves_keys_and_recommends():
+    repo = FakeWrongAnswerRepo([101])
+    rec = FakeRecommender({101: [101, 201]})
+    resolver = FakeResolver(members={500: 42}, quizzes={(42, 9): 55})
+    uc = RecommendSimilarProblemsUseCase(repo, rec, resolver)
+    result = uc.execute_for_enrollment(enrollment_id=500, lesson_id=9, k=3)
+    assert result == {101: [201]}
+    assert rec.calls == [(42, 101, 3)]  # member_id로 변환돼 추천기에 넘어감
+
+
+def test_execute_for_enrollment_unknown_enrollment_returns_empty():
+    resolver = FakeResolver(members={}, quizzes={})
+    uc = RecommendSimilarProblemsUseCase(FakeWrongAnswerRepo([101]), FakeRecommender({101: [101, 201]}), resolver)
+    assert uc.execute_for_enrollment(enrollment_id=999, lesson_id=9) == {}
+
+
+def test_execute_for_enrollment_no_quiz_submission_returns_empty():
+    # enrollment은 알지만 그 레슨 퀴즈 제출 이력이 없는 경우 - 조용히 스킵
+    resolver = FakeResolver(members={500: 42}, quizzes={})
+    uc = RecommendSimilarProblemsUseCase(FakeWrongAnswerRepo([101]), FakeRecommender({101: [101, 201]}), resolver)
+    assert uc.execute_for_enrollment(enrollment_id=500, lesson_id=9) == {}
