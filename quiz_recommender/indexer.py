@@ -36,7 +36,7 @@ def _fetch_all_questions() -> list[dict]:
     # difficulty는 quiz_question에 컬럼 추가(마이그레이션) 후 채워진다.
     sql = """
         SELECT q.question_id, q.question_text, q.explanation, q.difficulty,
-               qz.course_id, qz.section_id
+               qz.course_id, qz.section_id, qz.instructor_id
         FROM quiz_question q
         JOIN quiz qz ON q.quiz_id = qz.quiz_id
     """

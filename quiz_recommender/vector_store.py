@@ -22,7 +22,7 @@ def ensure_collection() -> None:
             vectors_config=VectorParams(size=config.EMBEDDING_DIM, distance=Distance.COSINE),
         )
     # 필터에 쓰는 정수 필드들 인덱스 생성 (이미 있으면 무시 — 멱등)
-    for field in ("courseId", "sectionId", "difficulty"):
+    for field in ("courseId", "sectionId", "difficulty", "instructorId"):
         try:
             _client.create_payload_index(
                 collection_name=config.COLLECTION,
@@ -59,7 +59,8 @@ def upsert(rows: list[dict], vectors: list[list[float]], hashes: list[str]) -> N
             payload={
                 "courseId": r["course_id"],
                 "sectionId": r["section_id"],
-                "difficulty": r.get("difficulty"),   # 스키마에 difficulty 추가 후 채워짐
+                "difficulty": r.get("difficulty"),        # 스키마에 difficulty 추가 후 채워짐
+                "instructorId": r.get("instructor_id"),   # 강사 격리 필터용 (quiz.instructor_id)
                 "hash": h,
             },
         )
@@ -81,16 +82,24 @@ def retrieve_meta(problem_id: int) -> dict | None:
     if not res:
         return None
     p = res[0].payload or {}
-    return {"courseId": p.get("courseId"), "sectionId": p.get("sectionId"), "difficulty": p.get("difficulty")}
+    return {
+        "courseId": p.get("courseId"),
+        "sectionId": p.get("sectionId"),
+        "difficulty": p.get("difficulty"),
+        "instructorId": p.get("instructorId"),
+    }
 
 
 def search(query_id: int, spec: dict, exclude_ids: set[int], limit: int) -> list[int]:
     """query_id 문제 벡터를 기준으로 spec 필터에 맞는 유사 문제 검색.
     spec 예: {"courseId":5,"sectionId":12,"difficulty":2}
              {"courseId":5,"sectionId":12,"difficulty_range":(1,3)}
-             {"courseId":5}
+             {"courseId":5,"instructorId":9221}
+    instructorId가 spec에 있으면 강사 격리(다른 강사 문제 제외)가 강제된다.
     저장된 벡터를 query로 재사용하므로 텍스트 재전송이 필요 없다."""
     must = [FieldCondition(key="courseId", match=MatchValue(value=spec["courseId"]))]
+    if spec.get("instructorId") is not None:
+        must.append(FieldCondition(key="instructorId", match=MatchValue(value=spec["instructorId"])))
     if "sectionId" in spec:
         must.append(FieldCondition(key="sectionId", match=MatchValue(value=spec["sectionId"])))
     if "difficulty" in spec:

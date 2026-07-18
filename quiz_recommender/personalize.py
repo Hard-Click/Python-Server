@@ -85,17 +85,25 @@ def _ranked(pool: list[int], weak: set, target: int | None) -> list[int]:
 
 
 def personalized_recommend(student_id: int, query_id: int, course_id, k: int) -> list[int]:
-    # 1) 비슷함: 같은 강의 안 유사 후보 (원문제 자신 제외)
-    candidates = vector_store.search(query_id, {"courseId": course_id}, {query_id}, limit=CANDIDATE_POOL)
+    # 0) 이력부터 — 이력이 없으면(콜드스타트) 개인화 신호가 없으므로 베이스라인에 맡긴다.
+    #    (recommender._recommend 가 빈 리스트를 받으면 섹션 필터가 걸린 폴백 사다리로 채움)
+    rounds = db.get_answer_rounds(student_id)
+    if not rounds:
+        return []
+
+    # 1) 비슷함: 같은 강의 안 유사 후보 (원문제 자신 제외, 강사 격리 필터 포함)
+    meta = _meta_of(query_id)
+    spec = {"courseId": course_id}
+    if meta and meta.get("instructorId") is not None:
+        spec["instructorId"] = meta["instructorId"]   # 강사 간 문제 공유 금지 정책
+    candidates = vector_store.search(query_id, spec, {query_id}, limit=CANDIDATE_POOL)
 
     # 2) 필요함: 라운드 이력에서 오답/정답/약점 유도, 이미 맞힌 문제는 후보에서 제외
-    rounds = db.get_answer_rounds(student_id)
     correct = {qid for rd in rounds for qid, ok in rd["answers"] if ok}
     weak = {rd["section_id"] for rd in rounds for _, ok in rd["answers"] if not ok}
     pool = [c for c in candidates if c not in correct]
 
     # 3) 수준: 원문제 단원의 라운드들로 사다리 상태 판정 (촉발 라운드 제외)
-    meta = _meta_of(query_id)
     orig_diff = meta["difficulty"] if meta else None
     section = meta["sectionId"] if meta else None
     if orig_diff is None:

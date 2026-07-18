@@ -11,11 +11,14 @@ import types
 import pytest
 
 # --- recommender import 전에 무거운 의존성을 가짜 모듈로 주입 ---
-sys.modules["db"] = types.ModuleType("db")
+_fake_db = types.ModuleType("db")
+_fake_db.get_answer_rounds = lambda sid: []   # 기본: 이력 없음(콜드스타트) → 개인화는 베이스라인에 양보
+sys.modules["db"] = _fake_db
 _fake_vs = types.ModuleType("vector_store")
 sys.modules["vector_store"] = _fake_vs
 
 import recommender  # noqa: E402  (가짜 주입 후 import 해야 함)
+import personalize  # noqa: E402
 
 
 def _seq_search(sequence):
@@ -144,3 +147,71 @@ def test_qdrant_search_failure_degrades_to_self(rec, monkeypatch):
         raise RuntimeError("Qdrant search failed")
     monkeypatch.setattr(rec.vector_store, "search", _boom, raising=False)
     assert rec.get_similar_problems(1, 100, k=2) == [100]
+
+
+# --- 강사 격리 (instructorId) ---
+
+def test_instructor_filter_in_every_fallback_spec(rec, monkeypatch):
+    """meta에 instructorId가 있으면 모든 폴백 spec에 강사 격리 필터가 걸린다."""
+    monkeypatch.setattr(
+        rec.vector_store, "retrieve_meta",
+        lambda pid: {"courseId": 1, "sectionId": 2, "difficulty": 2, "instructorId": 9221},
+        raising=False,
+    )
+    seen_specs = []
+    def _spy(query_id, spec, exclude_ids, limit):
+        seen_specs.append(dict(spec))
+        return []
+    monkeypatch.setattr(rec.vector_store, "search", _spy, raising=False)
+    rec.get_similar_problems(1, 100, k=2)
+    assert seen_specs, "search가 최소 1회 호출돼야 함"
+    assert all(s.get("instructorId") == 9221 for s in seen_specs)
+
+
+def test_no_instructor_in_meta_keeps_specs_clean(rec, monkeypatch):
+    """옛 인덱스(instructorId payload 없음) → spec에 필터 미포함(하위호환)."""
+    seen_specs = []
+    def _spy(query_id, spec, exclude_ids, limit):
+        seen_specs.append(dict(spec))
+        return []
+    monkeypatch.setattr(rec.vector_store, "search", _spy, raising=False)
+    rec.get_similar_problems(1, 100, k=2)
+    assert all("instructorId" not in s for s in seen_specs)
+
+
+# --- 개인화 연결 ---
+
+def test_personalized_results_come_first(rec, monkeypatch):
+    """개인화가 결과를 내면 그것이 유사 슬롯을 우선 차지한다."""
+    monkeypatch.setattr(
+        rec.personalize, "personalized_recommend",
+        lambda sid, qid, cid, k: [301, 302],
+    )
+    assert rec.get_similar_problems(7, 100, k=2) == [100, 301, 302]
+
+
+def test_personalized_partial_filled_by_baseline(rec, monkeypatch):
+    """개인화가 1개만 내면 나머지는 베이스라인 유사도로 채우되 중복 없음."""
+    monkeypatch.setattr(
+        rec.personalize, "personalized_recommend",
+        lambda sid, qid, cid, k: [201],   # 201은 베이스라인 첫 후보와 동일 → 중복 제외 확인
+    )
+    assert rec.get_similar_problems(7, 100, k=2) == [100, 201, 202]
+
+
+def test_personalize_failure_falls_back_to_baseline(rec, monkeypatch):
+    """개인화 내부 장애(RDS 등) → 베이스라인 추천은 그대로 살아있다."""
+    def _boom(sid, qid, cid, k):
+        raise RuntimeError("RDS down in personalize")
+    monkeypatch.setattr(rec.personalize, "personalized_recommend", _boom)
+    assert rec.get_similar_problems(7, 100, k=2) == [100, 201, 202]
+
+
+def test_cold_start_uses_baseline(rec):
+    """이력 없음(콜드스타트, 기본 fixture) → personalize가 []를 반환하고 베이스라인이 채움."""
+    assert rec.get_similar_problems(7, 100, k=2) == [100, 201, 202]
+
+
+def test_personalize_cold_start_returns_empty():
+    """personalize 자체 계약: 이력 없으면 [] (베이스라인에 양보)."""
+    assert personalize.personalized_recommend(99, 100, 1, 2) == []
