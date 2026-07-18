@@ -1,5 +1,5 @@
 # 자동생성(build_demo_thumbnails.py). S3 업로드된 썸네일 키. 시더가 S3_BUCKET env 와 조합해 URL 생성.
-S3_PREFIX = 'demo-thumbs'
+S3_PREFIX = 'thumbnails/demo'
 DEMO_THUMB_KEYS = {
     'kor': 'kor.jpg',
     'math1': 'math1.jpg',

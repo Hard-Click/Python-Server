@@ -47,8 +47,9 @@ except Exception:
     try:
         from demo_thumbnails import S3_PREFIX, DEMO_THUMB_KEYS, CATALOG_THUMB_KEYS
     except Exception:
-        S3_PREFIX, DEMO_THUMB_KEYS, CATALOG_THUMB_KEYS = "demo-thumbs", {}, []
+        S3_PREFIX, DEMO_THUMB_KEYS, CATALOG_THUMB_KEYS = "thumbnails/demo", {}, []
 _S3_BUCKET = os.environ.get("S3_BUCKET")
+S3_PREFIX = os.environ.get("S3_THUMB_PREFIX") or S3_PREFIX   # 업로드 위치 다르면 런타임 override
 
 
 def _s3_thumb(key):
