@@ -215,3 +215,86 @@ def test_cold_start_uses_baseline(rec):
 def test_personalize_cold_start_returns_empty():
     """personalize 자체 계약: 이력 없으면 [] (베이스라인에 양보)."""
     assert personalize.personalized_recommend(99, 100, 1, 2) == []
+
+
+# --- 신호③ 시간 (풀이시간 기반 선정 우선순위) ---
+# 후보 메타: 301=단원A, 302=단원B, 303=단원C (전부 같은 강의·같은 난이도 → tier 효과만 격리)
+
+_TIME_META = {
+    100: {"courseId": 1, "sectionId": 99, "difficulty": 2, "instructorId": None},  # 원문제(단원 밖)
+    301: {"courseId": 1, "sectionId": 11, "difficulty": 2, "instructorId": None},
+    302: {"courseId": 1, "sectionId": 22, "difficulty": 2, "instructorId": None},
+    303: {"courseId": 1, "sectionId": 33, "difficulty": 2, "instructorId": None},
+}
+
+
+@pytest.fixture
+def time_env(monkeypatch):
+    """개인화 시간신호 테스트 공통 세팅: 후보 3개(301/302/303), 메타 고정, 캐시 초기화."""
+    personalize._meta_of.cache_clear()
+    monkeypatch.setattr(
+        personalize.vector_store, "retrieve_meta",
+        lambda pid: _TIME_META.get(pid), raising=False,
+    )
+    monkeypatch.setattr(
+        personalize.vector_store, "search",
+        lambda qid, spec, exclude, limit: [301, 302, 303], raising=False,
+    )
+    yield
+    personalize._meta_of.cache_clear()
+
+
+def test_wrong_and_slow_section_ranked_first(time_env, monkeypatch):
+    """틀림+느림 단원(22)이 틀림-빠름 단원(11)보다 먼저 추천된다."""
+    rounds = [
+        # 중앙값: [10,10,90] → 10 → threshold 15
+        {"section_id": 11, "answers": [(1, False), (2, True)], "times": {1: 10, 2: 10}},
+        {"section_id": 22, "answers": [(3, False)], "times": {3: 90}},   # 틀림+느림 → tier 0
+    ]
+    monkeypatch.setattr(personalize.db, "get_answer_rounds", lambda sid: rounds)
+    picked = personalize.personalized_recommend(7, 100, 1, 2)
+    assert picked[0] == 302, "틀림+느림 단원(302)이 1순위여야 함"
+    assert picked == [302, 301]
+
+
+def test_correct_but_slow_not_excluded(time_env, monkeypatch):
+    """맞았지만 느린 문제는 완전 습득이 아니므로 후보에서 제외되지 않는다."""
+    rounds = [
+        # 301을 맞혔지만 느림(90 ≥ 15) → mastered 아님 → pool에 남음
+        {"section_id": 11, "answers": [(301, True), (4, True), (5, False)],
+         "times": {301: 90, 4: 10, 5: 10}},
+    ]
+    monkeypatch.setattr(personalize.db, "get_answer_rounds", lambda sid: rounds)
+    picked = personalize.personalized_recommend(7, 100, 1, 3)
+    assert 301 in picked, "맞음+느림 문제는 제외되면 안 됨"
+
+
+def test_correct_and_fast_excluded(time_env, monkeypatch):
+    """맞고 빨랐던 문제(완전 습득)는 기존처럼 후보에서 제외된다."""
+    rounds = [
+        {"section_id": 11, "answers": [(301, True), (4, False), (5, True)],
+         "times": {301: 10, 4: 90, 5: 10}},
+    ]
+    monkeypatch.setattr(personalize.db, "get_answer_rounds", lambda sid: rounds)
+    picked = personalize.personalized_recommend(7, 100, 1, 3)
+    assert 301 not in picked, "맞음+빠름(완전 습득) 문제는 제외돼야 함"
+
+
+def test_no_time_data_behaves_like_before(time_env, monkeypatch):
+    """시간 미측정(times 전부 None/부족) → 신호 꺼짐: 맞힌 문제 전부 제외 + 틀린 단원 우선."""
+    rounds = [
+        {"section_id": 11, "answers": [(301, True)], "times": {301: None}},   # 맞음 → 제외(기존 동작)
+        {"section_id": 22, "answers": [(3, False)], "times": {3: None}},      # 틀림 → 우선 단원
+    ]
+    monkeypatch.setattr(personalize.db, "get_answer_rounds", lambda sid: rounds)
+    picked = personalize.personalized_recommend(7, 100, 1, 2)
+    assert 301 not in picked
+    assert picked[0] == 302, "틀린 단원(22)의 후보가 우선"
+
+
+def test_times_key_missing_is_tolerated(time_env, monkeypatch):
+    """eval_offline 등 times 키가 아예 없는 라운드도 동작한다(하위호환)."""
+    rounds = [{"section_id": 22, "answers": [(3, False)]}]   # times 키 없음
+    monkeypatch.setattr(personalize.db, "get_answer_rounds", lambda sid: rounds)
+    picked = personalize.personalized_recommend(7, 100, 1, 2)
+    assert picked[0] == 302
