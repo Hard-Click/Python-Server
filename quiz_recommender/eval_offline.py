@@ -11,6 +11,8 @@ import sys
 import types
 from pathlib import Path
 
+sys.stdout.reconfigure(encoding="utf-8")  # Windows cp949 콘솔에서 화살표(→) 깨짐 방지
+
 HERE = Path(__file__).parent
 labels = json.loads((HERE / "eval_labels.json").read_text(encoding="utf-8"))
 _rounds = {int(s): v.get("rounds", []) for s, v in labels["students"].items()}
