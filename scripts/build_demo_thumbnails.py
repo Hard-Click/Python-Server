@@ -18,7 +18,7 @@ SRC = sys.argv[1] if len(sys.argv) > 1 else r"C:\Users\user\Desktop\메가스터
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.path.join(HERE, "demo_thumbs")
 OUT_PY = os.path.join(HERE, "demo_thumbnails.py")
-S3_PREFIX = "demo-thumbs"
+S3_PREFIX = "thumbnails/demo"   # 기존 공개 썸네일과 같은 thumbnails/* 프리픽스(정책 커버) 아래
 TARGET = 16 / 9
 
 # 데모 4코스 → (원본파일, 출력 ASCII 파일명). 수학 2코스=칠판 강사·순열조합, 국어·사탐=강사.
