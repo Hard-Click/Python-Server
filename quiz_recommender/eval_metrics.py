@@ -96,6 +96,20 @@ def baseline_recommend(student_id: int, query_id: int, course_id, k: int) -> lis
     return vector_store.search(query_id, {"courseId": course_id}, {query_id}, limit=k)
 
 
+def make_serving_recommend(personalized_fn):
+    """서빙 동등 어댑터 — recommender.get_similar_problems 와 같은 폴백 규칙으로 잰다.
+    개인화가 k 를 못 채우면(콜드스타트 [] 포함) 남은 슬롯을 베이스라인 유사도로 채운다.
+    날것 personalized_fn 을 그대로 재면 콜드스타트 학생이 0점 처리돼 서빙 품질과 어긋난다."""
+    def rec(student_id: int, query_id: int, course_id, k: int) -> list[int]:
+        found = list(personalized_fn(student_id, query_id, course_id, k))[:k]
+        if len(found) < k:
+            fill = vector_store.search(
+                query_id, {"courseId": course_id}, {query_id, *found}, limit=k - len(found))
+            found += [f for f in fill if f not in found]
+        return found
+    return rec
+
+
 def make_section_lookup():
     """question_id → sectionId. Qdrant payload 에서 읽고 캐시한다."""
     cache: dict[int, int | None] = {}
@@ -227,7 +241,9 @@ def main() -> None:
 
     try:
         from personalize import personalized_recommend  # 2주차 산출물
-        results["personalized"] = evaluate(personalized_recommend, labels, section_of, difficulty_of, expected_pair_fn)
+        results["personalized"] = evaluate(
+            make_serving_recommend(personalized_recommend),
+            labels, section_of, difficulty_of, expected_pair_fn)
     except ImportError:
         print("[안내] personalize.personalized_recommend 미구현 → 베이스라인만 측정합니다.")
 

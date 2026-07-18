@@ -1,100 +1,100 @@
 {
   "_readme": [
-    "데모 평가셋 — sample_problems.json 의 실제 23문제(Qdrant 적재 완료) 기준.",
-    "relevant_ids 는 같은 type(파일에 명시) 기준으로 라벨링.",
+    "평가셋 v2 — 프로덕션 RDS(course 17,21)에 시딩된 실데이터 수학 100문제(question_id 151~250, Qdrant 적재 완료) 기준.",
+    "relevant_ids 는 같은 section 안에서도 '진짜 같은 풀이 개념'인 문제만 지문을 보고 수작업 라벨링.",
     "students[].rounds 는 제출 1건 단위 이력 — eval_offline.py 가 db.get_answer_rounds 를 이걸로 대체.",
-    "학생 프로필: 9301 TOP(인수분해 약점) / 9302 FLOOR(유리화 계속 틀림) / 9303 TOP(극한) /",
-    "9304 MID(근의공식) / 9305 BASE(신규) / 9306 교차 약점(유리화 계열 sec2+3)."
+    "학생 프로필(v1 페르소나 구조 유지): 9301 TOP(지수·로그 약점) / 9302 FLOOR(수열의 극한 계속 틀림) /",
+    "9303 TOP(미분) / 9304 MID(확률, TOP 찍고 틀림) / 9305 BASE(신규·콜드스타트) / 9306 교차 약점(수열 s27 + 미분 s28)."
   ],
 
   "k": 2,
 
   "queries": {
-    "101": { "course_id": 1, "relevant_ids": [102, 103, 104], "note": "이차방정식-인수분해" },
-    "103": { "course_id": 1, "relevant_ids": [101, 102, 104], "note": "이차방정식-인수분해" },
-    "111": { "course_id": 1, "relevant_ids": [112, 113], "note": "이차방정식-근의공식" },
-    "201": { "course_id": 1, "relevant_ids": [202, 203, 204], "note": "분모유리화" },
-    "202": { "course_id": 1, "relevant_ids": [201, 203, 204], "note": "분모유리화" },
-    "301": { "course_id": 1, "relevant_ids": [302, 303, 304], "note": "극한-인수분해" },
-    "311": { "course_id": 1, "relevant_ids": [312, 313], "note": "극한-유리화" },
-    "401": { "course_id": 1, "relevant_ids": [402], "note": "일차방정식" }
+    "155": { "course_id": 17, "relevant_ids": [156, 160], "note": "지수방정식 a^x=b" },
+    "158": { "course_id": 17, "relevant_ids": [159], "note": "로그 곱 — 밑변환 연쇄" },
+    "171": { "course_id": 17, "relevant_ids": [173, 176], "note": "등차수열 일반항" },
+    "172": { "course_id": 17, "relevant_ids": [177], "note": "등비수열 일반항" },
+    "185": { "course_id": 17, "relevant_ids": [186, 181], "note": "다항함수 미분" },
+    "188": { "course_id": 17, "relevant_ids": [189, 184], "note": "극값 (f'=0)" },
+    "202": { "course_id": 21, "relevant_ids": [206, 208], "note": "조합 nCr" },
+    "216": { "course_id": 21, "relevant_ids": [211, 213], "note": "주사위 기본확률" },
+    "218": { "course_id": 21, "relevant_ids": [219, 212], "note": "복원/독립 곱확률" },
+    "234": { "course_id": 21, "relevant_ids": [235], "note": "유리식 극한 (최고차항 비)" },
+    "239": { "course_id": 21, "relevant_ids": [240], "note": "등비급수 합" }
   },
 
   "students": {
     "9301": {
-      "wrong_question_ids": [101, 103],
-      "weak_sections": [1],
-      "solved_correct_ids": [102, 111],
-      "note": "인수분해 약점, 102는 이미 맞힘(복습 제외 대상), 직전 라운드 전부 정답 → TOP",
+      "wrong_question_ids": [155, 158],
+      "weak_sections": [17],
+      "solved_correct_ids": [153, 152],
+      "note": "지수·로그 약점, 직전 라운드 전부 정답 → TOP. 153/152는 이미 맞힘(복습 제외 대상)",
       "rounds": [
-        { "section_id": 1, "answers": [[102, 1], [111, 1]] },
-        { "section_id": 1, "answers": [[101, 0], [103, 0]] }
+        { "section_id": 17, "answers": [[153, 1], [152, 1]] },
+        { "section_id": 17, "answers": [[155, 0], [158, 0]] }
       ]
     },
     "9302": {
-      "wrong_question_ids": [211, 201, 202],
-      "weak_sections": [2],
-      "solved_correct_ids": [213, 101, 102],
-      "note": "유리화 계열 계속 틀림 → FLOOR",
+      "wrong_question_ids": [231, 234, 239],
+      "weak_sections": [32],
+      "solved_correct_ids": [233, 201, 202],
+      "note": "수열의 극한 계속 틀림 → FLOOR. 다른 섹션(순열조합)은 잘함",
       "rounds": [
-        { "section_id": 2, "answers": [[211, 0], [213, 1]] },
-        { "section_id": 2, "answers": [[201, 0], [202, 0]] },
-        { "section_id": 1, "answers": [[101, 1], [102, 1]] }
+        { "section_id": 32, "answers": [[231, 0], [233, 1]] },
+        { "section_id": 32, "answers": [[234, 0], [239, 0]] },
+        { "section_id": 21, "answers": [[201, 1], [202, 1]] }
       ]
     },
     "9303": {
-      "wrong_question_ids": [301, 311],
-      "weak_sections": [3],
-      "solved_correct_ids": [302, 303],
-      "note": "극한 직전 라운드 전부 정답 → TOP. 302/303은 이미 맞힘 — baseline 은 이걸 또 추천함",
+      "wrong_question_ids": [188, 185],
+      "weak_sections": [28],
+      "solved_correct_ids": [181, 183],
+      "note": "미분 직전 라운드 전부 정답 → TOP. 181/183은 이미 맞힘 — baseline 은 이걸 또 추천함",
       "rounds": [
-        { "section_id": 3, "answers": [[302, 1], [303, 1]] },
-        { "section_id": 3, "answers": [[301, 0], [311, 0]] }
+        { "section_id": 28, "answers": [[181, 1], [183, 1]] },
+        { "section_id": 28, "answers": [[188, 0], [185, 0]] }
       ]
     },
     "9304": {
-      "wrong_question_ids": [103, 111, 113],
-      "weak_sections": [1],
-      "solved_correct_ids": [101, 102, 104],
-      "note": "TOP 찍고 틀림 → MID (중+상 믹스)",
+      "wrong_question_ids": [218, 216],
+      "weak_sections": [30],
+      "solved_correct_ids": [211, 213, 214],
+      "note": "확률 TOP 찍고 틀림 → MID (중+상 믹스)",
       "rounds": [
-        { "section_id": 1, "answers": [[101, 1], [102, 1]] },
-        { "section_id": 1, "answers": [[103, 0], [104, 1]] },
-        { "section_id": 1, "answers": [[111, 0], [113, 0]] }
+        { "section_id": 30, "answers": [[211, 1], [213, 1], [214, 1]] },
+        { "section_id": 30, "answers": [[218, 0], [216, 0]] }
       ]
     },
     "9305": {
-      "wrong_question_ids": [401],
-      "weak_sections": [4],
+      "wrong_question_ids": [202],
+      "weak_sections": [21],
       "solved_correct_ids": [],
-      "note": "신규 학생, 첫 오답 → BASE(콜드스타트)",
-      "rounds": [
-        { "section_id": 4, "answers": [[401, 0]] }
-      ]
+      "note": "신규 학생 — 이력 없음(콜드스타트), BASE",
+      "rounds": []
     },
     "9306": {
-      "wrong_question_ids": [311, 312, 202],
-      "weak_sections": [2, 3],
-      "solved_correct_ids": [211],
-      "note": "유리화 계열 교차 약점 (분모유리화 sec2 + 극한-유리화 sec3)",
+      "wrong_question_ids": [171, 172, 188],
+      "weak_sections": [27, 28],
+      "solved_correct_ids": [174, 181],
+      "note": "교차 약점 — 수열(s27)과 미분(s28) 둘 다 흔들림",
       "rounds": [
-        { "section_id": 3, "answers": [[311, 0], [312, 0]] },
-        { "section_id": 2, "answers": [[202, 0], [211, 1]] }
+        { "section_id": 27, "answers": [[174, 1], [171, 0], [172, 0]] },
+        { "section_id": 28, "answers": [[181, 1], [188, 0]] }
       ]
     }
   },
 
   "scenarios": [
-    { "student_id": 9301, "query_id": 101 },
-    { "student_id": 9301, "query_id": 103 },
-    { "student_id": 9302, "query_id": 201 },
-    { "student_id": 9302, "query_id": 202 },
-    { "student_id": 9303, "query_id": 301 },
-    { "student_id": 9303, "query_id": 311 },
-    { "student_id": 9304, "query_id": 111 },
-    { "student_id": 9304, "query_id": 103 },
-    { "student_id": 9305, "query_id": 401 },
-    { "student_id": 9306, "query_id": 202 },
-    { "student_id": 9306, "query_id": 311 }
+    { "student_id": 9301, "query_id": 155 },
+    { "student_id": 9301, "query_id": 158 },
+    { "student_id": 9302, "query_id": 234 },
+    { "student_id": 9302, "query_id": 239 },
+    { "student_id": 9303, "query_id": 188 },
+    { "student_id": 9303, "query_id": 185 },
+    { "student_id": 9304, "query_id": 218 },
+    { "student_id": 9304, "query_id": 216 },
+    { "student_id": 9305, "query_id": 202 },
+    { "student_id": 9306, "query_id": 171 },
+    { "student_id": 9306, "query_id": 172 }
   ]
 }
