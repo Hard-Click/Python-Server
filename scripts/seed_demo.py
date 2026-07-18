@@ -45,6 +45,16 @@ TODAY_DT = datetime(TODAY.year, TODAY.month, TODAY.day, 9, 0, tzinfo=timezone.ut
 INSTRUCTOR_ID = 9200
 # 9201~9204=서사용 4인(박모범/이눈치/최밀림/정위험), 9205~9212=이탈관리 목록 채우기용 위험군.
 PERSONA_IDS = [9201, 9202, 9203, 9204, 9205, 9206, 9207, 9208, 9209, 9210, 9211, 9212]
+# 카탈로그(강의 둘러보기) 채우기용 강사 10명 — 각자 코스 1개 + 재생되는 영상 강의 4개.
+CATALOG_INSTRUCTOR_IDS = list(range(9220, 9230))
+
+# 실제로 재생되는 공개 영상(HTTPS·archive.org 공개영화, 임베드 가능). (url, 실제 길이 초).
+# 재생 어댑터가 s3_key 없으면 video_url을 그대로 스트리밍하므로, S3 업로드 없이 이 URL만으로 재생된다.
+DEMO_VIDEOS = [
+    ("https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4", 596),
+    ("https://archive.org/download/Sintel/sintel-2048-surround_512kb.mp4", 888),
+    ("https://archive.org/download/ElephantsDream/ed_1024_512kb.mp4", 654),
+]
 LESSON_COUNT = 10
 EXPECTED_MIN = 40                       # 강사 추정 강의시간(분)
 EXPECTED_SEC = EXPECTED_MIN * 60
@@ -114,6 +124,51 @@ PERSONAS = {
                recency=2, miss_streak=8, dropout=False),       # ≈0.449 MEDIUM
 }
 
+# ── 카탈로그 강사/코스 (둘러보기 화면 채우기용, 학생 미수강) ───────────────
+# member_id는 9220부터. 코스당 재생되는 영상 강의 4개. 페르소나 서사와 무관.
+CATALOG_INSTRUCTORS = [
+    dict(name="한지문", subject="국어", one_line="비문학 독해 12년, 지문이 눈에 들어오게",
+         course="수능 국어 비문학 독해 전략",
+         career="전) 대형학원 국어 대표강사 · 수능 비문학 교재 3종 집필",
+         intro="지문을 '읽는 법'부터 다시 잡습니다. 감이 아니라 근거로 답을 고르게."),
+    dict(name="미분해", subject="수학", one_line="수1·수2 개념을 한 줄로",
+         course="수학Ⅰ·Ⅱ 개념 완성",
+         career="전) 인강 수학 강사 · 누적 수강 8만",
+         intro="공식 암기 말고 왜 그렇게 되는지. 개념이 잡히면 킬러도 풀립니다."),
+    dict(name="김보카", subject="영어", one_line="하루 30단어, 수능 어휘 정복",
+         course="수능 영어 어휘 마스터",
+         career="영어교육 석사 · EBS 연계 어휘 분석 10년",
+         intro="어원과 예문으로 오래 남는 단어. 독해 속도가 달라집니다."),
+    dict(name="이연표", subject="한국사", one_line="흐름으로 외우는 한국사",
+         course="수능 한국사 흐름 잡기",
+         career="전) 한국사능력검정 최상위 배출 · 한국사 교재 집필",
+         intro="사건을 점이 아니라 선으로. 연표가 저절로 그려집니다."),
+    dict(name="문해력", subject="국어", one_line="문학, 감상 말고 분석",
+         course="수능 국어 문학 분석",
+         career="국문학 박사수료 · 문학 파트 전문 10년",
+         intro="화자·정서·표현을 도구로. 처음 보는 작품도 뚫립니다."),
+    dict(name="정석해", subject="수학", one_line="확통·미적 선택과목 집중",
+         course="수학 선택과목(확통·미적) 특강",
+         career="전) 학원 수학과 팀장 · 선택과목 전문",
+         intro="선택과목은 전략입니다. 시간 대비 점수가 나오는 순서로."),
+    dict(name="그래머", subject="영어", one_line="구문이 보이면 독해가 빨라진다",
+         course="수능 영어 구문·문법",
+         career="영어학 전공 · 구문 독해 교재 집필",
+         intro="문장 구조를 눈으로. 어려운 지문일수록 구문이 답입니다."),
+    dict(name="사탐킹", subject="사회탐구", one_line="생윤·사문 개념 압축",
+         course="사회탐구 핵심 개념(생윤·사문)",
+         career="전) 사탐 대표강사 · 개념 요약서 베스트셀러",
+         intro="방대한 사탐을 표 한 장으로. 헷갈리는 개념만 콕콕."),
+    dict(name="물화생", subject="과학탐구", one_line="과탐 킬러 유형 정복",
+         course="과학탐구 킬러 유형 분석",
+         career="과학교육 석사 · 과탐 문항 분석 8년",
+         intro="유형을 알면 킬러도 패턴입니다. 실전 순서대로 훈련."),
+    dict(name="문학소녀", subject="국어", one_line="화법과 작문, 감점 없이",
+         course="수능 국어 화법과 작문",
+         career="전) EBS 국어 검토위원 · 화작 파트 전문",
+         intro="화작은 실수 싸움입니다. 틀리는 지점만 골라 잡아드려요."),
+]
+
 
 def popcount(n):
     return bin(n).count("1")
@@ -147,13 +202,15 @@ class Seeder:
 
     # ── 재실행 대비 데모 데이터 삭제 ──
     def wipe(self):
-        ids = ",".join(str(i) for i in PERSONA_IDS + [INSTRUCTOR_ID])
+        instructor_ids = [INSTRUCTOR_ID] + CATALOG_INSTRUCTOR_IDS
+        ids = ",".join(str(i) for i in PERSONA_IDS + instructor_ids)
         self.cur.execute("SET FOREIGN_KEY_CHECKS=0")
         # 전역/알림: 데모 DB라 fsrs_params 전체 초기화, 페르소나 알림 정리
         self.cur.execute("DELETE FROM fsrs_params")
         self.cur.execute(f"DELETE FROM notification WHERE receiver_id IN ({ids})")
-        # 코스: 강사가 만든 것만
-        self.cur.execute("SELECT course_id FROM course WHERE author_id=%s", (INSTRUCTOR_ID,))
+        # 코스: 데모 강사 + 카탈로그 강사 10명이 만든 것 전부
+        iph = ",".join(str(i) for i in instructor_ids)
+        self.cur.execute(f"SELECT course_id FROM course WHERE author_id IN ({iph})")
         course_ids = [r["course_id"] for r in self.cur.fetchall()]
         self.cur.execute("SELECT enrollment_id FROM enrollment WHERE member_id IN (%s)" % ids)
         enr_ids = [r["enrollment_id"] for r in self.cur.fetchall()]
@@ -233,9 +290,13 @@ class Seeder:
                             ("전체", course_id))
         lessons = []
         for i in range(1, LESSON_COUNT + 1):
-            lid = self.x("""INSERT INTO lesson (created_at, order_index, title, section_id, duration_seconds)
-                VALUES (%s,%s,%s,%s,%s)""",
-                (dt_str(TODAY_DT), i, f"{i}강", section_id, EXPECTED_SEC))
+            # 재생되는 영상 부여(video_url) — duration_seconds는 스케줄러/효율계수 계산에 쓰이므로
+            # 페르소나 서사가 틀어지지 않도록 EXPECTED_SEC 그대로 둔다(실영상 길이로 바꾸지 않음).
+            vurl = DEMO_VIDEOS[(i - 1) % len(DEMO_VIDEOS)][0]
+            lid = self.x("""INSERT INTO lesson
+                (created_at, order_index, title, section_id, duration_seconds, video_url, file_processing_status)
+                VALUES (%s,%s,%s,%s,%s,%s,'COMPLETED')""",
+                (dt_str(TODAY_DT), i, f"{i}강", section_id, EXPECTED_SEC, vurl))
             lessons.append(lid)
         # 선수관계: 순차(각 강의는 직전 강의 선수) - CP-SAT 순서 제약 시연
         for a, b in zip(lessons, lessons[1:]):
@@ -270,6 +331,38 @@ class Seeder:
         self.x("""INSERT INTO fsrs_params (scope, student_id, weights, retention_target)
             VALUES ('GLOBAL', NULL, %s, 0.9)""", (json.dumps(weights),))
         return course_id, section_id, lessons, quiz_by_lesson
+
+    def catalog(self):
+        """둘러보기 화면용 강사 10명 + 코스 10개 + 코스당 재생되는 영상 강의 4개.
+        학생이 수강하지 않는 카탈로그 데이터(스케줄러/위험도 서사와 무관)."""
+        for idx, c in enumerate(CATALOG_INSTRUCTORS):
+            mid = CATALOG_INSTRUCTOR_IDS[idx]
+            uname = f"inst_cat{idx + 1}"
+            # 강사(설명 포함): career=경력, introduction=소개, one_line_intro=한 줄 소개
+            self.x("""INSERT INTO members
+                (member_id, name, email, username, password, role, status,
+                 is_locked, is_password_change_required, login_fail_count, optional_terms_agreed,
+                 career, introduction, one_line_intro, created_at)
+                VALUES (%s,%s,%s,%s,%s,'INSTRUCTOR','ACTIVE', 0,0,0,1, %s,%s,%s,%s)""",
+                (mid, c["name"], f"{uname}@flown.demo", uname, PW_HASH,
+                 c["career"], c["intro"], c["one_line"], dt_str(TODAY_DT)))
+            course_id = self.x("""INSERT INTO course
+                (author_id, price, title, created_at, description, price_type, status, subject)
+                VALUES (%s, 0, %s, %s, %s, 'FREE', 'PUBLISHED', %s)""",
+                (mid, c["course"], dt_str(TODAY_DT),
+                 f"{c['name']} 강사의 {c['course']}. {c['intro']}", c["subject"]))
+            section_id = self.x("INSERT INTO course_section (order_index, title, course_id) VALUES (1,%s,%s)",
+                                ("전체", course_id))
+            for li in range(1, 5):   # 강의 4개, 재생되는 영상 부여
+                url, secs = DEMO_VIDEOS[(li - 1) % len(DEMO_VIDEOS)]
+                self.x("""INSERT INTO lesson
+                    (created_at, order_index, title, section_id, duration_seconds, video_url, file_processing_status)
+                    VALUES (%s,%s,%s,%s,%s,%s,'COMPLETED')""",
+                    (dt_str(TODAY_DT), li, f"{li}강", section_id, secs, url))
+            # 코스 정책(둘러보기/상세에서 참조) — 데모 코스와 동일 형식
+            self.x("""INSERT INTO course_learning_policy
+                (course_id, recommended_duration_weeks, daily_recommended_minutes, difficulty, weekly_max_load_min)
+                VALUES (%s, 8, 90, 'MEDIUM', 630)""", (course_id,))
 
     def persona(self, mid, cfg, course_id, section_id, lessons, quiz_by_lesson):
         self.member(mid, cfg["name"], cfg["username"], "STUDENT")
@@ -474,6 +567,8 @@ def main():
     s.wipe()
     print("seeding fixtures…")
     course_id, section_id, lessons, quiz_by_lesson = s.fixtures()
+    print(f"seeding catalog ({len(CATALOG_INSTRUCTORS)} instructors + courses + videos)…")
+    s.catalog()
     results = []
     for mid, cfg in PERSONAS.items():
         print(f"seeding {cfg['name']} ({mid})…")
