@@ -325,10 +325,12 @@ class Seeder:
         # student_availability: V3.2.3 에서 enrollment_id -> member_id 로 전환됨(학생 단위).
         # 예전엔 enrollment_id 로 지웠는데, 첫 시딩은 enr_ids 가 비어 이 블록을 건너뛰어서
         # 드러나지 않았고 재실행(멱등) 때만 1054 Unknown column 으로 터졌다.
+        # video_progress: video_id=lesson.id 인데 재시딩 때 lesson id가 바뀌므로 같이 지워야
+        # 고아 행이 안 남는다(잔디 daily_study_stats 는 시더 무관 — 건드리지 않음).
         for t, col in (("enrollment", "member_id"), ("member_lesson_stat", "member_id"),
                        ("student_availability", "member_id"),
                        ("student_capacity", "student_id"), ("student_diagnostic_score", "member_id"),
-                       ("quiz_submission", "member_id")):
+                       ("quiz_submission", "member_id"), ("video_progress", "member_id")):
             self.cur.execute(f"DELETE FROM {t} WHERE {col} IN ({ids})")
         # 코스 하위 (quiz/lesson/section)
         if course_ids:
@@ -599,6 +601,19 @@ class Seeder:
                 VALUES (%s,%s,%s,%s,%s)""",
                 (mid, lid, cfg["actual_sec"], 2 if cfg["actual_sec"] > EXPECTED_SEC else 0,
                  dt_str(datetime.combine(TODAY - timedelta(days=cfg["recency"]), datetime.min.time()))))
+
+        # ── video_progress (완료 강의 시청완료 백필) ──
+        # 학생 화면 진도율(learning_activity GetCourseProgress)은 video_progress.is_completed
+        # (video_id = lesson.id) 만으로 계산된다 — 이 백필이 없으면 페르소나 진도율이 전부 0%.
+        # 완료 일시는 과거 DONE 슬롯과 같은 날짜(저녁 21시)로 맞춘다.
+        for i, lid in enumerate(completed):
+            vdt = datetime.combine(monday - timedelta(days=len(completed) - i),
+                                   datetime.min.time()) + timedelta(hours=21)
+            self.x("""INSERT INTO video_progress
+                (member_id, course_id, video_id, last_position_sec, watch_time_sec,
+                 is_completed, completed_at, updated_at)
+                VALUES (%s,%s,%s,%s,%s,1,%s,%s)""",
+                (mid, course_id, lid, EXPECTED_SEC, EXPECTED_SEC, dt_str(vdt), dt_str(vdt)))
 
         # ── 효율계수 ──
         completed_for_eff = [{"expected_duration_min": EXPECTED_MIN,
