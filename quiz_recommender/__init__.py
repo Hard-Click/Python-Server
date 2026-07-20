@@ -9,6 +9,8 @@
 주의:
 - import 시 config가 같은 폴더의 .env에서 QDRANT_URL/QDRANT_API_KEY를 읽는다.
   (.env가 없으면 실제 환경변수 사용)
+- QDRANT_URL/QDRANT_API_KEY가 없어도 import는 항상 통과한다 — 그 상태로 호출하면
+  런타임 장애와 동일하게 [원문제]를 반환한다(계약은 리턴값으로만 표현, 예외 없음).
 - 추천 경로는 Gemini 키가 없어도 import·동작한다. (임베딩은 인덱싱 배치에서만 사용)
 """
 try:

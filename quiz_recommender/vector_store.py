@@ -10,21 +10,33 @@ try:
 except ImportError:
     import config
 
-_client = QdrantClient(url=config.QDRANT_URL, api_key=config.QDRANT_API_KEY)
+_client: QdrantClient | None = None
+
+
+def _get_client() -> QdrantClient:
+    """Qdrant 클라이언트 지연 생성. 환경변수 누락도 런타임 장애와 동일하게
+    '사용 시점 예외'로 표현한다 — import는 항상 통과(정책 ⓐ, 종준 배치 보호)."""
+    global _client
+    if _client is None:
+        if not config.QDRANT_URL:
+            raise RuntimeError("QDRANT_URL 환경변수 누락 — Qdrant 연결 불가")
+        _client = QdrantClient(url=config.QDRANT_URL, api_key=config.QDRANT_API_KEY)
+    return _client
 
 
 def ensure_collection() -> None:
     """컬렉션이 없으면 코사인 거리로 생성하고, 필터 대상 payload 필드에 인덱스를 만든다.
     Qdrant는 payload 필드로 필터하려면 해당 필드에 인덱스가 있어야 한다."""
-    if not _client.collection_exists(config.COLLECTION):
-        _client.create_collection(
+    client = _get_client()
+    if not client.collection_exists(config.COLLECTION):
+        client.create_collection(
             collection_name=config.COLLECTION,
             vectors_config=VectorParams(size=config.EMBEDDING_DIM, distance=Distance.COSINE),
         )
     # 필터에 쓰는 정수 필드들 인덱스 생성 (이미 있으면 무시 — 멱등)
     for field in ("courseId", "sectionId", "difficulty", "instructorId"):
         try:
-            _client.create_payload_index(
+            client.create_payload_index(
                 collection_name=config.COLLECTION,
                 field_name=field,
                 field_schema=PayloadSchemaType.INTEGER,
@@ -38,8 +50,9 @@ def existing_id_hashes() -> dict[int, str]:
     배치 인덱서가 '바뀐 문제만' 다시 임베딩할지 판단하는 데 쓴다."""
     result: dict[int, str] = {}
     offset = None
+    client = _get_client()
     while True:
-        points, offset = _client.scroll(
+        points, offset = client.scroll(
             collection_name=config.COLLECTION,
             with_payload=["hash"], with_vectors=False,
             limit=1000, offset=offset,
@@ -66,16 +79,16 @@ def upsert(rows: list[dict], vectors: list[list[float]], hashes: list[str]) -> N
         )
         for r, vec, h in zip(rows, vectors, hashes)
     ]
-    _client.upsert(collection_name=config.COLLECTION, points=points)
+    _get_client().upsert(collection_name=config.COLLECTION, points=points)
 
 
 def delete_ids(ids: list[int]) -> None:
-    _client.delete(collection_name=config.COLLECTION, points_selector=list(ids))
+    _get_client().delete(collection_name=config.COLLECTION, points_selector=list(ids))
 
 
 def retrieve_meta(problem_id: int) -> dict | None:
     """저장된 문제의 course/section/difficulty 조회. 없으면 None(=미인덱싱)."""
-    res = _client.retrieve(
+    res = _get_client().retrieve(
         collection_name=config.COLLECTION,
         ids=[problem_id], with_payload=True, with_vectors=False,
     )
@@ -108,7 +121,7 @@ def search(query_id: int, spec: dict, exclude_ids: set[int], limit: int) -> list
         lo, hi = spec["difficulty_range"]
         must.append(FieldCondition(key="difficulty", range=Range(gte=lo, lte=hi)))
 
-    res = _client.query_points(
+    res = _get_client().query_points(
         collection_name=config.COLLECTION,
         query=query_id,
         query_filter=Filter(
