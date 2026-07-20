@@ -277,6 +277,7 @@ class Seeder:
         self.cur = conn.cursor()
         # 스키마 방어: quiz_question.difficulty 가 있는 RDS/로컬에서만 난이도 심음(없으면 생략).
         self._qq_difficulty = self._has_column("quiz_question", "difficulty")
+        self._lesson_secs = {}   # lesson_id -> 실제 영상 길이(초). duration_seconds와 동일하게 유지.
 
     def _has_column(self, table, col):
         self.cur.execute(f"SHOW COLUMNS FROM {table} LIKE %s", (col,))
@@ -372,12 +373,15 @@ class Seeder:
                (mid, name, f"{username}@flown.demo", username, PW_HASH, role, dt_str(TODAY_DT)))
 
     def _lesson(self, order, title, section_id):
-        """재생 영상 붙은 lesson 1개. duration_seconds는 효율계수용이라 EXPECTED_SEC 고정."""
-        vurl = DEMO_VIDEOS[(order - 1) % len(DEMO_VIDEOS)][0]
-        return self.x("""INSERT INTO lesson
+        """재생 영상 붙은 lesson 1개. duration_seconds는 실제 영상 길이(DEMO_VIDEOS)로 맞춘다 —
+        효율계수 계산은 이 값이 아니라 EXPECTED_MIN 상수를 직접 쓰므로 서로 영향 없음."""
+        vurl, secs = DEMO_VIDEOS[(order - 1) % len(DEMO_VIDEOS)]
+        lid = self.x("""INSERT INTO lesson
             (created_at, order_index, title, section_id, duration_seconds, video_url, file_processing_status)
             VALUES (%s,%s,%s,%s,%s,%s,'COMPLETED')""",
-            (dt_str(TODAY_DT), order, title, section_id, EXPECTED_SEC, vurl))
+            (dt_str(TODAY_DT), order, title, section_id, secs, vurl))
+        self._lesson_secs[lid] = secs
+        return lid
 
     def _quiz_generic(self, qid, idx):
         """가짜 퀴즈(국어·탐구): 문항 3 × 보기 4, 1번 정답. 반환 qmeta=[(question_id,[option_id..])]."""
@@ -609,11 +613,12 @@ class Seeder:
         for i, lid in enumerate(completed):
             vdt = datetime.combine(monday - timedelta(days=len(completed) - i),
                                    datetime.min.time()) + timedelta(hours=21)
+            lesson_sec = self._lesson_secs.get(lid, EXPECTED_SEC)
             self.x("""INSERT INTO video_progress
                 (member_id, course_id, video_id, last_position_sec, watch_time_sec,
                  is_completed, completed_at, updated_at)
                 VALUES (%s,%s,%s,%s,%s,1,%s,%s)""",
-                (mid, course_id, lid, EXPECTED_SEC, EXPECTED_SEC, dt_str(vdt), dt_str(vdt)))
+                (mid, course_id, lid, lesson_sec, lesson_sec, dt_str(vdt), dt_str(vdt)))
 
         # ── 효율계수 ──
         completed_for_eff = [{"expected_duration_min": EXPECTED_MIN,
