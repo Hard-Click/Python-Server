@@ -5,26 +5,29 @@ Gemini 임베딩 + Qdrant 벡터 검색.
 
 > 종준 스케줄러(`Python-Server`)와 **같은 레포(모노레포)**의 독립 폴더다.
 > 문제 데이터는 같은 RDS를 읽는다("RDS 공유" 철학 동일).
-> **통합은 함수 호출**: 종준 FSRS가 `recommender.get_similar_problems()`를 같은 프로세스에서 직접 호출한다(HTTP 아님).
+> **통합은 실시간 HTTP**: 백엔드(Spring) `SimilarProblemRecommenderAdapter`가 학생의 유사퀴즈
+> 요청 시 `GET /quiz/similar/{problemId}?student_id=&k=`로 이 서버(app.py)를 호출한다.
+> (초기 설계였던 '종준 FSRS 배치의 함수 직접 호출'은 폐기 — 2026-07-20 확정.
+> 야간 배치는 추천을 소비하지 않으므로 크론 시각과 인덱스 신선도는 무관하다.)
 
 ## 구성
 ```
-recommender.py   진입 함수 get_similar_problems() ← 종준 FSRS가 호출
+recommender.py   진입 함수 get_similar_problems() ← app.py(HTTP)가 호출
 indexer.py       배치: RDS에서 문제 읽어 임베딩 → Qdrant 동기화
 vector_store.py  Qdrant 저장/검색 (questionId = point id)
 embedding.py     Gemini 임베딩 (배치 호출, gemini-embedding-001)
 db.py            공유 RDS(MySQL) 연결
 config.py        환경변수 설정
-app.py           로컬 테스트용 HTTP 래퍼 (선택 — 프로덕션 경로 아님)
+app.py           프로덕션 서빙 API — 백엔드가 HTTP로 호출 (monitoring EC2 systemd 상시 구동)
 ```
 
 ## 동작 방식
 ```
 [배치] indexer.py ──RDS에서 문제 읽기──▶ Gemini 임베딩 ──▶ Qdrant
-[추천] 종준 FSRS ──get_similar_problems(problem_id, k)──▶ Qdrant 검색 ──▶ [원문제, 유사...]
+[추천] FE → 백엔드(SimilarQuizService) ──GET /quiz/similar/{id}──▶ app.py ──▶ Qdrant 검색 ──▶ [원문제, 유사...]
 ```
-- **인덱싱은 배치**가 RDS를 직접 읽어 처리.
-- **추천은 함수 호출** — FSRS가 필요할 때 import 해서 호출.
+- **인덱싱은 배치**가 RDS를 직접 읽어 처리 (크론: monitoring EC2, KST 02:30).
+- **추천은 실시간 HTTP** — 학생이 유사퀴즈 화면에 진입할 때 백엔드가 오답별로 호출.
 
 ## 진입 함수
 ```python
@@ -45,10 +48,12 @@ get_similar_problems(student_id, problem_id, k=2)
 4. 같은 course (인접 섹션 포함)
 → 그래도 없으면 원문제만 반환.
 
-> **종준 FSRS 통합 확정(계약)**:
-> - import 경로: `from quiz_recommender import get_similar_problems` (Python-Server/ 루트 실행)
-> - 호출: 새벽 리프레시 배치가 학생별로 틀린 `question_id`마다 sync 1회 루프 호출
-> - 에러 방식(정책 ⓐ): RDS/Qdrant **장애 시에도 예외를 던지지 않고 `[원문제]` 반환** → 배치는 `[]`=잘못된 id skip, `[원문제]`=추천 없음 skip 으로 처리하면 예외 처리 불필요.
+> **백엔드 통합 확정(계약)** — Spring `SimilarProblemRecommenderAdapter` ↔ app.py:
+> - 호출: `GET {QUIZ_AI_BASE_URL}/quiz/similar/{problemId}?student_id={memberId}&k=2`
+>   (SimilarQuizService가 학생의 오답마다 1회 호출, `quiz.ai.enabled=false`면 호출 자체를 스킵)
+> - 에러 방식(정책 ⓐ): RDS/Qdrant **장애 시에도 예외를 던지지 않고 `[원문제]` 반환**,
+>   서버 자체가 죽으면 백엔드 어댑터가 빈 리스트 폴백 → 어느 쪽이 죽어도 화면 에러 없음.
+> - 백엔드 env: `QUIZ_AI_ENABLED` / `QUIZ_AI_BASE_URL` (SSM `/hard-click/prod/QUIZ_AI_*` → compose 전달).
 
 ## 세팅
 ```bash
@@ -64,8 +69,8 @@ copy .env.example .env    # 값 채우기 (Gemini/Qdrant/RDS)
 python indexer.py
 #   → {"total": 5000, "embedded": 12, "deleted": 1}  (바뀐 것만 임베딩)
 
-# 2) (선택) 로컬 테스트 HTTP 래퍼
-uvicorn app:app --port 8000
+# 2) 서빙 API (프로덕션: monitoring EC2 systemd quiz-recommender.service로 상시 구동)
+uvicorn app:app --host 0.0.0.0 --port 8000
 #   GET /quiz/similar/101?k=2  → {"problems": [101, 140, 178]}
 ```
 

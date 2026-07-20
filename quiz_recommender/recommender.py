@@ -1,4 +1,5 @@
-"""추천 진입 함수. 종준 FSRS가 같은 프로세스에서 직접 호출한다(HTTP 아님).
+"""추천 진입 함수. 백엔드(Spring)가 app.py HTTP API를 통해 호출한다.
+(초기 설계였던 '종준 FSRS 배치의 함수 직접 호출'은 폐기 — 실시간 HTTP 서빙으로 확정.)
 
 get_similar_problems(student_id, problem_id, k=2)  → 문제 id 리스트
   · 정상+유사 충분 → [원문제, 유사1, 유사2]
