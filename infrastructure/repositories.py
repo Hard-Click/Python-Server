@@ -143,23 +143,33 @@ class MySQLStudentCapRepository:
 
 
 class MySQLLessonProgressRepository:
-    """⚠️ 추정 스키마: study_timer 도메인의 lesson_progress(실제 학습시간 기록)에
-    lecture.expected_duration_min을 조인 - 강사 추정치 대 실제 소요시간 비교용.
-    course_id도 같이 반환 - 과목마다 학생의 학습속도가 다를 수 있어 코스별로 계수를 분리해야 함
+    """실측 학습시간(member_lesson_stat.actual_completion_sec) 대 강사 추정치(lesson.duration_seconds)
+    비교용. course_id도 같이 반환 - 과목마다 학생의 학습속도가 다를 수 있어 코스별로 계수를 분리해야 함
     (수학은 느리고 영어는 빠른 학생 등 - 학생 전체 단일 계수로는 이런 편차를 못 잡음).
-    ⚠️ 실 스키마는 member_lesson_stat(actual_completion_sec) - 배치 실행 전 정합 필요(seed_demo 우회 중)."""
+    lesson엔 course_id가 없어 course_section 경유로 조인(실 스키마 정합 2026-07-20, 로컬 hardclick_db 실행 검증)."""
 
     def get_completed_lesson_durations(self, member_id: str) -> list:
         sql = """
-            SELECT l.course_id, l.expected_duration_min, lp.actual_duration_min
-            FROM lesson_progress lp
-            JOIN enrollment e ON e.id = lp.enrollment_id
-            JOIN lecture l ON l.id = lp.lecture_id
-            WHERE e.member_id = %s AND lp.completed_at IS NOT NULL
+            SELECT cs.course_id,
+                   l.duration_seconds / 60 AS expected_duration_min,
+                   mls.actual_completion_sec / 60 AS actual_duration_min
+            FROM member_lesson_stat mls
+            JOIN lesson l ON l.id = mls.lesson_id
+            JOIN course_section cs ON cs.id = l.section_id
+            WHERE mls.member_id = %s
+              AND mls.actual_completion_sec IS NOT NULL
+              AND l.duration_seconds > 0
         """
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql, (member_id,))
-            return cur.fetchall()
+            rows = cur.fetchall()
+        # MySQL 나눗셈은 Decimal로 오는데 domain(compute_efficiency_coefficient)은 float 산술을
+        # 기대한다 - 타입 변환은 인프라 경계인 여기서 흡수한다.
+        return [{
+            "course_id": row["course_id"],
+            "expected_duration_min": float(row["expected_duration_min"]),
+            "actual_duration_min": float(row["actual_duration_min"]),
+        } for row in rows]
 
 
 class MySQLScheduleRepository:
@@ -308,20 +318,13 @@ class MySQLPendingReviewRepository:
 
 
 class MySQLSubscriptionRepository:
-    """⚠️ 추정 스키마: enrollment -> member -> subscription.suneung_date.
-    실제 subscription엔 suneung_date 컬럼이 없어 배포 전까지 항상 None(상위 폴백 상수 사용) - 정합 필요."""
+    """실제 스키마엔 수능일 컬럼이 없다(subscriptions 테이블 전컬럼 확인, suneung_date 부재 —
+    V1 baseline~V3.5 전 마이그레이션 grep 확인 2026-07-15). 옛 추정 SQL(subscription 단수 테이블)은
+    1146으로 크래시했음(정합 2026-07-20). 수능일이 스키마에 생기기 전까지 None을 반환하고
+    상위(use_case)가 폴백 상수(DEFAULT_MAX_REVIEW_INTERVAL_DAYS 등)로 동작한다."""
 
     def get_suneung_date(self, enrollment_id: str):
-        sql = """
-            SELECT s.suneung_date
-            FROM enrollment e
-            JOIN subscription s ON s.member_id = e.member_id
-            WHERE e.enrollment_id = %s
-        """
-        with get_connection() as conn, conn.cursor() as cur:
-            cur.execute(sql, (enrollment_id,))
-            row = cur.fetchone()
-            return row["suneung_date"] if row else None
+        return None
 
 
 class MySQLQuizScoreRepository:
@@ -333,7 +336,7 @@ class MySQLQuizScoreRepository:
             FROM quiz_submission qs
             JOIN lesson_quiz_map lqm ON lqm.quiz_id = qs.quiz_id
             JOIN enrollment e ON e.member_id = qs.member_id
-            WHERE e.id = %s AND lqm.lesson_id = %s
+            WHERE e.enrollment_id = %s AND lqm.lesson_id = %s
             ORDER BY qs.submitted_at DESC
             LIMIT 1
         """
