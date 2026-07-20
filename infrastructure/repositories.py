@@ -23,9 +23,20 @@ LessonProgress(lesson_progress/lecture) / StudentNotification(notification) / Ex
 Subscription(subscription.suneung_date - 실제 컬럼 없음, None 폴백). seed_demo는 이들을 우회하므로 데모엔 영향 없음.
 """
 import json
+import logging
+
+import pymysql
 
 from domain.review import Card
 from infrastructure.db import get_connection
+
+logger = logging.getLogger(__name__)
+
+# experiment_exposure / experiment_shadow_decision 은 아직 어느 Flyway 마이그레이션에도 없어
+# (스케줄러 테이블은 종호 V3.1.x 영역) 프로덕션 RDS엔 없을 가능성이 높다. 실험 로그는 관측 전용
+# (사용자 스케줄엔 절대 반영 안 함)이라, 이 테이블이 없다고 스케줄 확정(commit)을 500으로 막으면 안 된다.
+# → 스키마 미비 에러(테이블 없음/컬럼 없음)만 fail-soft로 넘기고, 그 외 DB 에러는 그대로 올려 버그를 가리지 않는다.
+_SCHEMA_NOT_READY_CODES = (1146, 1054)  # ER_NO_SUCH_TABLE, ER_BAD_FIELD_ERROR
 
 
 class MySQLLessonRepository:
@@ -41,7 +52,9 @@ class MySQLLessonRepository:
         """
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql, (course_id,))
-            return cur.fetchall()
+            rows = cur.fetchall()
+        # MySQL 나눗셈은 Decimal - domain(CP-SAT 입력 산술)은 float을 기대하므로 경계에서 변환
+        return [{"id": row["id"], "duration_min": float(row["duration_min"] or 0)} for row in rows]
 
     def get_prerequisites(self, course_id: str) -> list[tuple]:
         sql = """
@@ -221,15 +234,34 @@ class MySQLExperimentRepository:
     """⚠️ 추정 스키마: experiment_exposure 테이블에 이번 배치에서 학생이 어떤 variant를
     받았는지 적재만 함 - 배정 로직 자체는 domain/experiments.py(결정적 해시)라 여기선
     "기록"만 담당. 나중에 성적/완주율 데이터와 member_id+experiment_name으로 조인해서
-    scripts/calibrate_policy_constants.py의 A/B 분석에 씀."""
+    scripts/calibrate_policy_constants.py의 A/B 분석에 씀.
+
+    ⚠️ 이 테이블들(experiment_exposure/experiment_shadow_decision)은 아직 마이그레이션이 없어
+    프로덕션엔 없을 수 있다. 관측 전용이므로 스키마 미비 시엔 로그를 조용히 스킵하고(경고만)
+    스케줄 확정(commit)은 계속 진행한다 - _skip_if_schema_not_ready 참고."""
+
+    @staticmethod
+    def _skip_if_schema_not_ready(table: str, exc: pymysql.err.MySQLError) -> None:
+        """스키마 미비(테이블/컬럼 없음)면 경고만 남기고 삼킨다. 그 외 DB 에러는 그대로 재발생."""
+        code = exc.args[0] if exc.args else None
+        if code in _SCHEMA_NOT_READY_CODES:
+            logger.warning(
+                "실험 로그 스킵: %s 스키마 미비(code=%s). 관측 전용이라 스케줄엔 영향 없음. "
+                "정식 집계하려면 해당 테이블 마이그레이션 추가 필요.", table, code,
+            )
+            return
+        raise exc
 
     def log_exposure(self, member_id: str, experiment_name: str, variant) -> None:
         sql = """
             INSERT INTO experiment_exposure (member_id, experiment_name, variant, exposed_at)
             VALUES (%s, %s, %s, NOW())
         """
-        with get_connection() as conn, conn.cursor() as cur:
-            cur.execute(sql, (member_id, experiment_name, str(variant)))
+        try:
+            with get_connection() as conn, conn.cursor() as cur:
+                cur.execute(sql, (member_id, experiment_name, str(variant)))
+        except pymysql.err.MySQLError as exc:
+            self._skip_if_schema_not_ready("experiment_exposure", exc)
 
     def log_shadow_decision(self, member_id: str, experiment_name: str, decision: dict) -> None:
         """⚠️ 추정 스키마: experiment_shadow_decision 테이블에 shadow mode 결정 델타를 적재.
@@ -241,20 +273,27 @@ class MySQLExperimentRepository:
                  weekly_minutes_delta, schedule_would_change, detail, logged_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
         """
-        with get_connection() as conn, conn.cursor() as cur:
-            cur.execute(sql, (
-                member_id, experiment_name, str(decision.get("variant")),
-                decision.get("extension_delta"), decision.get("weekly_minutes_delta"),
-                bool(decision.get("schedule_would_change")), json.dumps(decision, ensure_ascii=False),
-            ))
+        try:
+            with get_connection() as conn, conn.cursor() as cur:
+                cur.execute(sql, (
+                    member_id, experiment_name, str(decision.get("variant")),
+                    decision.get("extension_delta"), decision.get("weekly_minutes_delta"),
+                    bool(decision.get("schedule_would_change")), json.dumps(decision, ensure_ascii=False),
+                ))
+        except pymysql.err.MySQLError as exc:
+            self._skip_if_schema_not_ready("experiment_shadow_decision", exc)
 
     def get_shadow_decisions(self, experiment_name: str) -> list:
         """⚠️ 추정 스키마: detail(JSON) 컬럼을 그대로 복원해 결정 dict 리스트로 반환.
         집계 로직은 domain/shadow_report.py(순수)가 담당 - 여기선 조회만."""
         sql = "SELECT detail FROM experiment_shadow_decision WHERE experiment_name = %s"
-        with get_connection() as conn, conn.cursor() as cur:
-            cur.execute(sql, (experiment_name,))
-            rows = cur.fetchall()
+        try:
+            with get_connection() as conn, conn.cursor() as cur:
+                cur.execute(sql, (experiment_name,))
+                rows = cur.fetchall()
+        except pymysql.err.MySQLError as exc:
+            self._skip_if_schema_not_ready("experiment_shadow_decision", exc)
+            return []  # 스키마 미비면 집계할 로그가 없는 것과 동일 - 빈 요약 반환
         return [json.loads(row["detail"]) for row in rows]
 
 

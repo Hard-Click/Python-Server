@@ -8,8 +8,9 @@ from infrastructure.repositories import (
     MySQLLessonRepository, MySQLDiagnosticScoreRepository, MySQLScheduleRepository,
     MySQLSubscriptionRepository, MySQLLessonProgressRepository,
     MySQLStudentNotificationRepository, MySQLExperimentRepository,
-    MySQLCourseLearningPolicyRepository,
+    MySQLCourseLearningPolicyRepository, MySQLStudentCapRepository,
 )
+from infrastructure.db import get_connection
 
 app = Flask(__name__)
 
@@ -28,6 +29,26 @@ use_case = GenerateWeeklyScheduleUseCase(
 
 # 관리자용 shadow 집계 조회(읽기 전용). 실측 전 shadow 로그를 화면/외부에서 볼 때 사용.
 shadow_summary_use_case = SummarizeShadowDecisionsUseCase(MySQLExperimentRepository())
+
+student_cap_repo = MySQLStudentCapRepository()
+
+
+def _get_active_enrollments(member_id) -> list[dict]:
+    """weekly_reflow.get_active_enrollments_by_student와 같은 행 구성을 member 1명으로 좁힌 것."""
+    sql = """
+        SELECT enrollment_id, course_id, enrolled_at, target_weeks
+        FROM enrollment WHERE member_id = %s AND status = 'IN_PROGRESS'
+    """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (member_id,))
+        rows = cur.fetchall()
+    return [{
+        "enrollment_id": row["enrollment_id"],
+        "course_id": row["course_id"],
+        # DB는 DATETIME, domain(compute_num_weeks)은 date 산술 - 경계에서 변환
+        "enrolled_at": row["enrolled_at"].date() if hasattr(row["enrolled_at"], "date") else row["enrolled_at"],
+        "target_weeks": row["target_weeks"],
+    } for row in rows]
 
 
 @app.post("/generate-preview")
@@ -55,6 +76,31 @@ def generate_commit():
         total_weekly_minutes=body["total_weekly_minutes"],
         commit=True,
         study_days=body.get("study_days"),  # 있으면 코스별 강도 상한 적용, 없으면 미적용
+    )
+    return jsonify(result)
+
+
+@app.post("/generate-for-member")
+def generate_for_member():
+    """수강신청 직후 BE(Spring)가 호출하는 실시간 생성 — 주간 배치를 기다리지 않고 즉시 반영.
+    /generate-commit과 달리 enrollments·가용시간을 호출자가 안 넘긴다: BE가 스케줄러 입력
+    조립(cap 폴백 등)을 중복 소유하지 않도록 여기서 weekly_reflow와 동일하게 직접 조회한다."""
+    body = request.get_json()
+    member_id = body["member_id"]
+
+    enrollments = _get_active_enrollments(member_id)
+    if not enrollments:
+        # 수강 전 구독만 한 회원 등 — 생성할 대상이 없는 것이지 오류가 아님
+        return jsonify({"status": "NO_ACTIVE_ENROLLMENT"})
+
+    total_weekly_minutes = student_cap_repo.get_weekly_available_minutes(member_id)
+    study_days = student_cap_repo.get_study_days(member_id)
+    result = use_case.execute(
+        member_id=member_id,
+        enrollments=enrollments,
+        total_weekly_minutes=total_weekly_minutes,
+        commit=True,
+        study_days=study_days,
     )
     return jsonify(result)
 

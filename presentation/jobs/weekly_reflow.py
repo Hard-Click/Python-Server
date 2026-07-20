@@ -30,7 +30,8 @@ def get_active_enrollments_by_student() -> dict:
         grouped.setdefault(row["member_id"], []).append({
             "enrollment_id": row["enrollment_id"],
             "course_id": row["course_id"],
-            "enrolled_at": row["enrolled_at"],
+            # DB는 DATETIME, domain(compute_num_weeks)은 date 산술 - 경계에서 변환
+            "enrolled_at": row["enrolled_at"].date() if hasattr(row["enrolled_at"], "date") else row["enrolled_at"],
             "target_weeks": row["target_weeks"],
         })
     return grouped
