@@ -29,29 +29,59 @@ MIN_REAL_EVENTS_FOR_CALIBRATION = 30  # 이 미만이면 실측이어도 신뢰 
 
 
 def load_real_population():
-    """실제 RDS에서 이탈 이벤트 데이터를 가져온다.
-    ⚠️ 추정 스키마: dropout_risk/daily_achievement/quiz_attempt를 조합해 학생별
-    (recency_days, miss_streak_days, quiz_avg_score, duration, event)을 구성해야 함 -
-    실제로는 별도 뷰나 배치 집계 테이블이 필요할 가능성이 높음. 지금은 자리만 잡아둠.
+    """실제 RDS에서 이탈 이벤트 데이터를 가져온다(실 스키마 정합 2026-07-20).
+
+    Cox 라벨(duration/event)은 daily_achievement 날짜에서 유도하지 않고 dropout_event를 직접 쓴다 -
+    관측기간·중도절단(censored) 판정이 이미 그 테이블의 계약이기 때문. enrollment.status에는
+    'dropped' 값이 없다(ENUM: COMPLETED/ENROLLED/EXPIRED/IN_PROGRESS/REFUNDED).
+
+    각 지표는 상관 서브쿼리로 뽑는다 - daily_achievement와 quiz_submission을 같이 JOIN하면
+    행이 곱해져서 SUM/AVG가 부풀려진다(옛 쿼리의 실제 버그).
+
+    ⚠️ quiz_avg_score는 member 단위다. quiz_submission엔 enrollment_id가 없어 코스별로 못 쪼갠다 -
+    다중 수강 학생은 타 코스 점수가 섞인다.
     """
     from infrastructure.db import get_connection
 
     sql = """
         SELECT
-          DATEDIFF(CURDATE(), MAX(da.date)) AS recency_days,
-          SUM(CASE WHEN da.achieved = FALSE THEN 1 ELSE 0 END) AS miss_streak_days,
-          AVG(qa.score_percent) AS quiz_avg_score,
-          DATEDIFF(CURDATE(), MIN(da.date)) AS duration,
-          MAX(CASE WHEN e.status = 'dropped' THEN 1 ELSE 0 END) AS event
+          DATEDIFF(CURDATE(), (
+            SELECT MAX(da.achieved_date) FROM daily_achievement da
+            WHERE da.enrollment_id = e.enrollment_id
+          )) AS recency_days,
+          (
+            SELECT COUNT(*) FROM daily_achievement da
+            WHERE da.enrollment_id = e.enrollment_id
+              AND da.achieved = 0
+              AND da.achieved_date > COALESCE((
+                    SELECT MAX(da2.achieved_date) FROM daily_achievement da2
+                    WHERE da2.enrollment_id = e.enrollment_id AND da2.achieved = 1
+                  ), '1000-01-01')
+          ) AS miss_streak_days,
+          (
+            SELECT AVG(qs.score) FROM quiz_submission qs
+            WHERE qs.member_id = e.member_id
+          ) AS quiz_avg_score,
+          de.observed_days AS duration,
+          de.event_occurred AS event
         FROM enrollment e
-        JOIN daily_achievement da ON da.enrollment_id = e.id
-        LEFT JOIN quiz_attempt qa ON qa.enrollment_id = e.id
-        GROUP BY e.id
+        JOIN dropout_event de ON de.enrollment_id = e.enrollment_id
     """
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(sql)
         rows = cur.fetchall()
-    return pd.DataFrame(rows)
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    # CoxPHFitter는 NaN에서 죽는다. 퀴즈 미응시(quiz_avg_score NULL) 학생이 섞이면 전체 적합이
+    # 실패하므로 여기서 떨궈내고, 몇 명이 빠졌는지는 표본수 판단에 필요하니 알린다.
+    required = ["recency_days", "miss_streak_days", "quiz_avg_score", "duration", "event"]
+    before = len(df)
+    df = df.dropna(subset=required)
+    if len(df) < before:
+        print(f"[calibrate] 지표 결측으로 {before - len(df)}명 제외 (남은 표본 {len(df)}명)")
+    return df.astype({c: float for c in required})
 
 
 def load_synthetic_fallback(n=300):
