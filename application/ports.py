@@ -45,6 +45,16 @@ class QuizScoreRepository(Protocol):
         ...
 
 
+class PendingReviewRepository(Protocol):
+    def find_review_targets(self) -> list[tuple[str, str]]:
+        """FSRS 복습 갱신이 필요한 (enrollment_id, lesson_id) 목록.
+
+        새 퀴즈 제출이 그 카드의 마지막 리뷰 이후에 생겼거나(=점수 갱신됨) 카드가 아직 없는
+        활성 수강 건. 야간/주간 배치가 이 목록만큼 ReviewLessonUseCase 를 돌린다.
+        """
+        ...
+
+
 class SubscriptionRepository(Protocol):
     def get_suneung_date(self, enrollment_id: str) -> Optional[date]:
         """구독 상한선(수능일). 구독에 안 잡혀있으면 None -> 호출부가 기본 상한값으로 대체."""

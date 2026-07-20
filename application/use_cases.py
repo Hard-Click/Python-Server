@@ -21,7 +21,7 @@ from application.ports import (
     WeeklyProgressRepository, SubscriptionRepository, LessonProgressRepository,
     StudentNotificationRepository, ExperimentRepository,
     WrongAnswerRepository, ProblemRecommenderPort, CourseLearningPolicyRepository,
-    EnrollmentQuizResolverPort,
+    EnrollmentQuizResolverPort, PendingReviewRepository,
 )
 
 # 구독에 수능일이 아직 안 잡혀있는 경우(온보딩 미완료 등)의 폴백 상한 - 관리자 전역정책값
@@ -389,6 +389,38 @@ class ReviewLessonUseCase:
         if suneung_date is None:
             return DEFAULT_MAX_REVIEW_INTERVAL_DAYS
         return max(1, (suneung_date - self.clock()).days)
+
+
+class UpdateDueReviewsUseCase:
+    """야간/주간 배치: 새 퀴즈 점수가 생긴 (enrollment, lesson) 카드의 FSRS 상태를 갱신한다.
+
+    카드 1장 갱신(ReviewLessonUseCase)을 대상 목록만큼 반복하는 오케스트레이션 계층.
+    한 카드 실패가 나머지를 막지 않도록 격리하고, 처리/스킵/실패 요약을 돌려준다
+    (배치 스크립트가 이 요약으로 error-router 알림을 보낸다).
+
+    이걸 배선하기 전까지 ReviewLessonUseCase 는 호출자가 없는 dead code 였다 — 이 유스케이스가
+    생산자(review_card.due 적재) 트리거다. 실행 진입점은 presentation/jobs/review_update.py.
+    """
+
+    def __init__(self, pending_repo: PendingReviewRepository, review_use_case: ReviewLessonUseCase):
+        self.pending_repo = pending_repo
+        self.review_use_case = review_use_case
+
+    def execute(self) -> dict:
+        targets = self.pending_repo.find_review_targets()
+        updated = 0
+        skipped = 0
+        failures = []
+        for enrollment_id, lesson_id in targets:
+            try:
+                due = self.review_use_case.execute(enrollment_id, lesson_id)
+                if due is None:
+                    skipped += 1  # 퀴즈 점수가 사라진 경계 케이스 - 카드 갱신 안 함
+                else:
+                    updated += 1
+            except Exception as e:  # noqa: BLE001 - 한 카드 실패를 격리(배치 전체를 멈추지 않음)
+                failures.append((enrollment_id, lesson_id, str(e)))
+        return {"targets": len(targets), "updated": updated, "skipped": skipped, "failures": failures}
 
 
 class RecommendSimilarProblemsUseCase:

@@ -278,6 +278,33 @@ class MySQLReviewCardRepository:
             cur.execute(sql, (enrollment_id, lesson_id, card.stability, card.difficulty, card.due, str(card.state)))
 
 
+class MySQLPendingReviewRepository:
+    """복습 갱신이 필요한 (enrollment_id, lesson_id) 목록. 컬럼은 실 마이그레이션 기준으로 확인함
+    (enrollment.enrollment_id PK/member_id/status=V1, lesson_quiz_map=V3.1.1,
+    quiz_submission.submitted_at=V3.3.1, review_card.last_review=V3.1.4).
+
+    조건: 활성 수강 + (카드 없음 OR 마지막 리뷰 이후 새 제출). 카드가 없으면 콜드스타트로 신규 생성되고,
+    이미 최신 제출까지 반영된 카드는 대상에서 빠져 배치가 같은 카드를 매일 다시 굽지 않는다
+    (당일 재리뷰로 처리되면 stability 가 왜곡되므로 이 멱등성이 중요하다).
+    quiz 는 lesson 이 아니라 course+section 단위라 lesson_quiz_map(N:N)으로 강의와 잇는다.
+    """
+
+    def find_review_targets(self) -> list[tuple[str, str]]:
+        sql = """
+            SELECT DISTINCT e.enrollment_id, lqm.lesson_id
+            FROM quiz_submission qs
+            JOIN lesson_quiz_map lqm ON lqm.quiz_id = qs.quiz_id
+            JOIN enrollment e ON e.member_id = qs.member_id
+            LEFT JOIN review_card rc
+              ON rc.enrollment_id = e.enrollment_id AND rc.lesson_id = lqm.lesson_id
+            WHERE e.status = 'active'
+              AND (rc.last_review IS NULL OR qs.submitted_at > rc.last_review)
+        """
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(sql)
+            return [(row["enrollment_id"], row["lesson_id"]) for row in cur.fetchall()]
+
+
 class MySQLSubscriptionRepository:
     """⚠️ 추정 스키마: enrollment -> member -> subscription.suneung_date.
     실제 subscription엔 suneung_date 컬럼이 없어 배포 전까지 항상 None(상위 폴백 상수 사용) - 정합 필요."""
