@@ -19,8 +19,8 @@ def get_active_enrollments_by_student() -> dict:
     """{member_id: [{"enrollment_id","course_id","enrolled_at","target_weeks"}]}
     학생별로 묶어야 다중코스 cap 분배 가능. target_weeks는 nullable(온보딩 미완료)."""
     sql = """
-        SELECT member_id, id AS enrollment_id, course_id, enrolled_at, target_weeks
-        FROM enrollment WHERE status = 'active'
+        SELECT member_id, enrollment_id, course_id, enrolled_at, target_weeks
+        FROM enrollment WHERE status = 'IN_PROGRESS'
     """
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(sql)

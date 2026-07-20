@@ -282,6 +282,8 @@ class MySQLPendingReviewRepository:
     """복습 갱신이 필요한 (enrollment_id, lesson_id) 목록. 컬럼은 실 마이그레이션 기준으로 확인함
     (enrollment.enrollment_id PK/member_id/status=V1, lesson_quiz_map=V3.1.1,
     quiz_submission.submitted_at=V3.3.1, review_card.last_review=V3.1.4).
+    enrollment.status 는 ENUM('COMPLETED','ENROLLED','EXPIRED','IN_PROGRESS','REFUNDED')(V1) -
+    '활성 수강'은 이 코드베이스 관례상 IN_PROGRESS(seed_demo 도 이 값으로 삽입, 다른 레포도 동일 필터 사용).
 
     조건: 활성 수강 + (카드 없음 OR 마지막 리뷰 이후 새 제출). 카드가 없으면 콜드스타트로 신규 생성되고,
     이미 최신 제출까지 반영된 카드는 대상에서 빠져 배치가 같은 카드를 매일 다시 굽지 않는다
@@ -297,7 +299,7 @@ class MySQLPendingReviewRepository:
             JOIN enrollment e ON e.member_id = qs.member_id
             LEFT JOIN review_card rc
               ON rc.enrollment_id = e.enrollment_id AND rc.lesson_id = lqm.lesson_id
-            WHERE e.status = 'active'
+            WHERE e.status = 'IN_PROGRESS'
               AND (rc.last_review IS NULL OR qs.submitted_at > rc.last_review)
         """
         with get_connection() as conn, conn.cursor() as cur:
