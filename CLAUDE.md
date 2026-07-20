@@ -27,6 +27,16 @@ presentation/    Flask 엔드포인트(api.py) + 크론 진입점(jobs/).
 ```bash
 pip install -r requirements.txt
 pytest tests/                        # domain 로직 테스트 (DB 불필요)
-python -m presentation.jobs.weekly_reflow   # 실제 배치 (DB 연결 환경변수 필요)
+python -m presentation.jobs.weekly_reflow    # 주간 리플로우 배치 (DB 연결 환경변수 필요)
+python -m presentation.jobs.review_update    # 복습 카드(FSRS) 갱신 배치 (야간) - 이걸 안 돌리면
+                                              # review_card.due 가 안 채워져서 스케줄에 복습이 안 뜬다
 python presentation/api.py           # 온보딩 즉시생성 엔드포인트
+```
+
+## 배포(EC2) crontab
+이 레포엔 crontab 파일이 없다 — Python EC2에 **수동으로 등록**돼 있다(`crontab -e`). 새 배치를 추가하면
+레포가 아니라 **서버 crontab**에 줄을 더해야 실제로 돈다. `review_update`는 아직 등록 안 됨(신규) - 배포 시 추가 필요:
+```cron
+# 매일 새벽 2시 - 복습 카드(FSRS) 갱신. weekly_reflow 보다 먼저 돌려 그 주의 review_card.due 를 최신으로.
+0 2 * * * cd /path/to/Python-Server && /path/to/venv/bin/python -m presentation.jobs.review_update >> /var/log/review_update.log 2>&1
 ```
