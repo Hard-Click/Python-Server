@@ -2,3 +2,5 @@
 __pycache__/
 *.pyc
 .env
+bench_results.csv
+index_math_from_seed.py
