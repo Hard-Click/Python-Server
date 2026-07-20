@@ -1,10 +1,12 @@
-"""로컬 테스트용 경량 HTTP 래퍼 (선택).
+"""유사문제 추천 HTTP 서빙 API (프로덕션 경로).
 
-실제 통합은 종준 FSRS가 recommender.get_similar_problems()를 함수로 직접 호출한다.
-이 파일은 개발 중 curl로 손쉽게 확인하려는 용도일 뿐, 프로덕션 통합 경로가 아니다.
+백엔드(Spring) SimilarProblemRecommenderAdapter가 quiz.ai.* 설정으로 이 서버를 호출한다.
+  GET /quiz/similar/{problem_id}?student_id=&k=  →  {"problems": [원문제, 유사...]}
+(초기 설계는 종준 FSRS 배치의 함수 직접 호출이었으나, 실제 제품은 학생이 유사퀴즈
+화면에 진입할 때 백엔드가 실시간 HTTP 호출하는 구조로 확정 — 2026-07-20)
 
-실행:  uvicorn app:app --port 8000
-확인:  GET /quiz/similar/{problem_id}?k=2
+운영: monitoring EC2에서 systemd(quiz-recommender.service)로 상시 구동.
+실행:  uvicorn app:app --host 0.0.0.0 --port 8000
 """
 from fastapi import FastAPI
 
@@ -15,7 +17,7 @@ except ImportError:
     import vector_store
     from recommender import get_similar_problems
 
-app = FastAPI(title="Quiz Recommender (test harness)")
+app = FastAPI(title="Quiz Recommender")
 
 
 @app.on_event("startup")
@@ -26,6 +28,16 @@ def _startup() -> None:
 @app.get("/quiz/similar/{problem_id}")
 def similar(problem_id: int, student_id: int = 0, k: int = 2) -> dict:
     return {"problems": get_similar_problems(student_id, problem_id, k)}   # [원문제, 유사...]
+
+
+@app.post("/quiz/submissions")
+def submissions(payload: dict) -> dict:
+    """백엔드 QuizSubmissionAiAdapter의 제출 전송 수신 스텁.
+
+    개인화 신호는 이 payload가 아니라 공유 RDS(quiz_submission_answer)를 직접 읽으므로
+    저장 없이 수신 확인만 한다 — quiz.ai.enabled=true일 때 백엔드 404 에러 로그 방지용.
+    """
+    return {"received": True}
 
 
 @app.get("/health")
