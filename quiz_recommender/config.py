@@ -25,6 +25,6 @@ EMBEDDING_MODEL = "gemini-embedding-001"   # Gemini. output_dimensionality로 �
 EMBEDDING_DIM = 1536                        # 1536으로 맞춰 기존 Qdrant 컬렉션과 호환 유지
 COLLECTION = "quiz_questions"
 
-QDRANT_URL = os.environ["QDRANT_URL"]
-QDRANT_API_KEY = os.environ["QDRANT_API_KEY"]
+QDRANT_URL = os.environ.get("QDRANT_URL")        # 없어도 import 통과 — 실제 사용 시점에 검사(정책 ⓐ)
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")  # 추천 경로엔 불필요(인덱싱만 씀) → 키 없어도 import 통과
