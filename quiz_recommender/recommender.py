@@ -110,11 +110,20 @@ def _fallback_specs(course, section, diff, instructor=None) -> list[dict]:
 
 
 def _exists_in_rds(problem_id: int) -> bool:
-    """문제가 실제로 존재하는지 RDS로 확인 (잘못된 id 판별용)."""
+    """문제가 실제로 존재하는지 RDS로 확인 (잘못된 id 판별용).
+    퀴즈 삭제는 soft-delete(V3.3.3)라 활성(deleted_at IS NULL) 퀴즈의 문제만 유효로 본다."""
     conn = db.get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM quiz_question WHERE question_id = %s", (problem_id,))
+            cur.execute(
+                """
+                SELECT 1
+                FROM quiz_question q
+                JOIN quiz qz ON qz.quiz_id = q.quiz_id
+                WHERE q.question_id = %s AND qz.deleted_at IS NULL
+                """,
+                (problem_id,),
+            )
             return cur.fetchone() is not None
     finally:
         conn.close()

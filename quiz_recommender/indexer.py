@@ -34,11 +34,14 @@ def _build_text(row: dict) -> str:
 
 def _fetch_all_questions() -> list[dict]:
     # difficulty는 quiz_question에 컬럼 추가(마이그레이션) 후 채워진다.
+    # deleted_at: 퀴즈 삭제는 soft-delete(V3.3.3) — 활성 퀴즈만 인덱싱해야
+    # 삭제된 퀴즈의 문제가 desired에서 빠지면서 아래 동기화 로직이 Qdrant에서도 지운다.
     sql = """
         SELECT q.question_id, q.question_text, q.explanation, q.difficulty,
                qz.course_id, qz.section_id, qz.instructor_id
         FROM quiz_question q
         JOIN quiz qz ON q.quiz_id = qz.quiz_id
+        WHERE qz.deleted_at IS NULL
     """
     conn = db.get_connection()
     try:
