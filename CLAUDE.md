@@ -33,10 +33,20 @@ python -m presentation.jobs.review_update    # 복습 카드(FSRS) 갱신 배치
 python presentation/api.py           # 온보딩 즉시생성 엔드포인트
 ```
 
-## 배포(EC2) crontab
-이 레포엔 crontab 파일이 없다 — Python EC2에 **수동으로 등록**돼 있다(`crontab -e`). 새 배치를 추가하면
-레포가 아니라 **서버 crontab**에 줄을 더해야 실제로 돈다. `review_update`는 아직 등록 안 됨(신규) - 배포 시 추가 필요:
-```cron
-# 매일 새벽 2시 - 복습 카드(FSRS) 갱신. weekly_reflow 보다 먼저 돌려 그 주의 review_card.due 를 최신으로.
-0 2 * * * cd /path/to/Python-Server && /path/to/venv/bin/python -m presentation.jobs.review_update >> /var/log/review_update.log 2>&1
-```
+## 배포(EC2) — 자동화됨 (2026-07-22)
+**과거의 함정(장애 원인):** 예전엔 CD가 없어 EC2에서 손으로 `git pull`, crontab도 서버에 수동 등록이었다.
+그 결과 배포 클론이 stale해져 `review_update.py`가 없는 채로 야간 배치가 매일 죽고 복습이 캘린더에 안 떴다.
+
+이제 **`main` 머지 → GitHub Actions(`.github/workflows/deploy-python-server.yml`)** 가 SSM RunCommand로
+app ASG 인스턴스에서 [`scripts/deploy_pull.sh`](scripts/deploy_pull.sh)를 돌린다. 이 스크립트가:
+- `git reset --hard origin/main` 으로 코드 정합 (DB/시드 무관, 코드 클론만),
+- venv/의존성 정합,
+- **crontab을 멱등 재작성**(관리 블록) — 배치 등록이 더 이상 수동이 아님.
+
+크론은 파이썬을 직접 부르지 않고 [`scripts/run_review_update.sh`](scripts/run_review_update.sh) 래퍼를 부른다
+(성공 시 `HEARTBEAT_URL`로 ping → '안 오면' 외부 모니터가 실패 감지. 파일 없음처럼 프로세스가 시작조차
+못 하는 실패는 앱 알림으로 못 잡기 때문).
+
+**ASG 재생성 대비:** launch template user-data에 `deploy_pull.sh`를 걸어두면 새 인스턴스도 부팅 시 자기정합됨.
+**필요 세팅(1회):** GitHub repo secret `AWS_DEPLOY_ROLE_ARN`(OIDC assume 역할), 인스턴스에 SSM 권한,
+`.env.cron`에 `HEARTBEAT_URL`.
