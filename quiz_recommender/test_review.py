@@ -78,6 +78,21 @@ def test_cap_total_limits_to_ten():
     assert len(result) == review.MAX_ORIGINALS_TOTAL == 10
 
 
+def test_synthetic_slow_correct_gets_selected_when_no_wrong_crowding():
+    """[가상 시나리오] 실데이터(9231)는 틀린 섹션 7개가 top-10을 다 채워 '느린 정답'
+    원문제가 선정까지는 못 갔다. 틀림이 자리를 안 뺏는 학생이면 '맞았지만 느림'이
+    실제로 원문제로 뽑히는가? → 뽑힌다. (본인 median 낮게 유지: 대부분 빠른정답)."""
+    # times median=1 → 임계값 1.5. @15만 느림. 빠른정답(@1)은 완전습득 → 제외.
+    rounds = [
+        _round(700, [(1, True), (3, True)], {1: 15, 3: 1}),   # q1 맞음+느림(target), q3 맞음+빠름(제외)
+        _round(701, [(2, True), (4, True)], {2: 15, 4: 1}),   # q2 맞음+느림(target), q4 맞음+빠름(제외)
+        _round(702, [(5, True), (6, True)], {5: 1, 6: 1}),    # 완전습득 섹션 → 전부 제외
+    ]
+    result = review._select_originals(rounds)
+    assert result == [(1, 700), (2, 701)]                     # 느린 정답 2개가 실제로 선정됨
+    assert not ({3, 4, 5, 6} & {qid for qid, _ in result})    # 빠른 정답은 하나도 안 뽑힘
+
+
 # ---------- recommend_review: 글루(원문제 선정 + 유사문제 부착) ----------
 
 def test_recommend_review_coldstart_returns_empty(monkeypatch):
