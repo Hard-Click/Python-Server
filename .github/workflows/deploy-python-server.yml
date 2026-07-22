@@ -1,0 +1,67 @@
+name: deploy-python-server
+
+# main에 머지되면 app ASG 인스턴스에 최신 코드를 배포한다.
+# 이번 장애의 근본 원인(스프링만 자동배포되고 Python은 수동 pull에 의존 → 배포 클론 stale)을 없앤다.
+#
+# 동작: SSM RunCommand로 ASG 태그가 붙은 인스턴스에서 scripts/deploy_pull.sh 를 실행.
+#       (인스턴스 교체 대비: ASG launch template user-data에도 같은 스크립트를 걸어두면
+#        새 인스턴스도 부팅 시 최신 코드로 자기정합된다 — 아래 문서 참고.)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  workflow_dispatch: {}   # 콘솔에서 수동 배포도 가능
+
+permissions:
+  id-token: write   # OIDC로 AWS 역할 assume
+  contents: read
+
+concurrency:
+  group: deploy-python-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-northeast-2
+
+      - name: Deploy to app ASG instances via SSM
+        env:
+          ASG_NAME: hard-click-app-asg
+        run: |
+          set -euo pipefail
+          # ASG에 현재 붙어있는 InService 인스턴스 ID 수집 (인스턴스 교체돼도 자동 추적).
+          IDS=$(aws autoscaling describe-auto-scaling-groups \
+                  --auto-scaling-group-names "$ASG_NAME" \
+                  --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
+                  --output text)
+          echo "targets: $IDS"
+          [ -n "$IDS" ] || { echo "no InService instances"; exit 1; }
+
+          CMD_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --targets "Key=InstanceIds,Values=$(echo $IDS | tr ' ' ',')" \
+            --comment "deploy Python-Server ${GITHUB_SHA::7}" \
+            --parameters commands='["sudo -iu ssm-user bash /home/ssm-user/Python-Server/scripts/deploy_pull.sh"]' \
+            --query 'Command.CommandId' --output text)
+          echo "SSM command: $CMD_ID"
+
+          # 완료 대기 + 실패 시 워크플로 실패.
+          for id in $IDS; do
+            aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$id" || true
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$id" --query Status --output text)
+            echo "== $id : $STATUS =="
+            aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$id" --query StandardOutputContent --output text || true
+            if [ "$STATUS" != "Success" ]; then
+              aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$id" --query StandardErrorContent --output text || true
+              exit 1
+            fi
+          done
