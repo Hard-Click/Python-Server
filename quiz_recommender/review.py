@@ -38,9 +38,11 @@ def recommend_review(student_id: int, k: int = 2) -> list[dict]:
     for problem_id, section_id in originals:
         recommended = recommender.get_similar_problems(student_id, problem_id, k)
         similar = recommended[1:] if recommended else []  # [0]=원문제 제외, 유사만
+        meta = personalize._meta_of(problem_id)  # 유사문제는 원문제와 같은 코스(course 격리)
         review_set.append({
             "problem_id": problem_id,
             "section_id": section_id,
+            "course_id": meta["courseId"] if meta else None,  # 백엔드가 그룹별 SimilarQuiz 저장에 사용
             "similar": similar,
         })
     return review_set

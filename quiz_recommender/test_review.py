@@ -101,16 +101,19 @@ def test_recommend_review_coldstart_returns_empty(monkeypatch):
     assert review.recommend_review(42) == []
 
 
-def test_recommend_review_attaches_similars_without_original(monkeypatch):
-    """선정된 원문제마다 get_similar_problems 결과에서 [0](원문제)을 뗀 유사만 붙는다."""
+def test_recommend_review_attaches_similars_and_course_without_original(monkeypatch):
+    """원문제마다 [0](원문제)을 뗀 유사만 붙고, 원문제의 course_id(백엔드 저장용)를 함께 싣는다."""
     rounds = [_round(500, [(11, False), (12, True), (13, True)], {11: 1, 12: 1, 13: 1})]
     monkeypatch.setattr(review.db, "get_answer_rounds", lambda sid: rounds)
     monkeypatch.setattr(
         review.recommender, "get_similar_problems",
         lambda sid, pid, k: [pid, 9001, 9002],   # [원문제, 유사1, 유사2]
     )
+    monkeypatch.setattr(review.personalize, "_meta_of", lambda qid: {"courseId": 88})
     result = review.recommend_review(7, k=2)
-    assert result == [{"problem_id": 11, "section_id": 500, "similar": [9001, 9002]}]
+    assert result == [
+        {"problem_id": 11, "section_id": 500, "course_id": 88, "similar": [9001, 9002]}
+    ]
 
 
 # ---------- /quiz/review 엔드포인트 배선 ----------
