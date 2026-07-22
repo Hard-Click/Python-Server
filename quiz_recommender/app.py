@@ -13,9 +13,11 @@ from fastapi import FastAPI
 try:
     from . import vector_store
     from .recommender import get_similar_problems
+    from .review import recommend_review
 except ImportError:
     import vector_store
     from recommender import get_similar_problems
+    from review import recommend_review
 
 app = FastAPI(title="Quiz Recommender")
 
@@ -28,6 +30,14 @@ def _startup() -> None:
 @app.get("/quiz/similar/{problem_id}")
 def similar(problem_id: int, student_id: int = 0, k: int = 2) -> dict:
     return {"problems": get_similar_problems(student_id, problem_id, k)}   # [원문제, 유사...]
+
+
+@app.get("/quiz/review/{student_id}")
+def review(student_id: int, k: int = 2) -> dict:
+    """학생 복습 세트 — 원문제(무엇을 복습할지)를 이력에서 선정하고 각 원문제의
+    유사문제 k개를 붙여 급한 순으로 반환. 콜드스타트(이력 없음)면 {"reviews": []}.
+    /quiz/similar 와 달리 원문제를 호출자가 안 넘긴다 — 선정까지 여기서 한다(정책 '안 B')."""
+    return {"reviews": recommend_review(student_id, k)}
 
 
 @app.post("/quiz/submissions")
