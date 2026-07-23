@@ -20,8 +20,7 @@ from application.ports import (
     ReviewCardRepository, QuizScoreRepository, ActivityRepository, RiskRepository,
     WeeklyProgressRepository, SubscriptionRepository, LessonProgressRepository,
     StudentNotificationRepository, ExperimentRepository,
-    WrongAnswerRepository, ProblemRecommenderPort, CourseLearningPolicyRepository,
-    EnrollmentQuizResolverPort, PendingReviewRepository,
+    CourseLearningPolicyRepository, PendingReviewRepository,
 )
 
 # 구독에 수능일이 아직 안 잡혀있는 경우(온보딩 미완료 등)의 폴백 상한 - 관리자 전역정책값
@@ -421,53 +420,6 @@ class UpdateDueReviewsUseCase:
             except Exception as e:  # noqa: BLE001 - 한 카드 실패를 격리(배치 전체를 멈추지 않음)
                 failures.append((enrollment_id, lesson_id, str(e)))
         return {"targets": len(targets), "updated": updated, "skipped": skipped, "failures": failures}
-
-
-class RecommendSimilarProblemsUseCase:
-    """학생이 퀴즈에서 틀린 문제마다 유사문제를 추천(BE quiz_recommender 계약을 해석).
-
-    리뷰(ReviewLessonUseCase)와 분리한 이유: 리뷰는 야간/주간 배치에서 카드 상태를 갱신하는
-    관심사고, 유사문제 추천은 학생이 퀴즈를 낸 직후 요청 시점에 "틀린 것 비슷한 문제 더 풀어봐"를
-    돌려주는 관심사라 트리거·주체가 다르다.
-
-    계약 해석(단위테스트로 고정):
-      - []              = 잘못된/없는 problem_id  -> 그 문제는 건너뜀
-      - [원문제]          = 유사문제 0개(RDS/indexer 미가동 시 포함) -> 추천 없음, 건너뜀
-      - [원문제, 유사...]  = result[0]=원문제(자기 자신, 버림), result[1:]=유사문제(추천)
-    반환: {틀린 question_id: [유사 question_id, ...]} - 추천이 실제로 있는 문제만 담는다.
-    """
-
-    def __init__(self, wrong_answer_repo: WrongAnswerRepository, recommender: ProblemRecommenderPort,
-                 resolver: EnrollmentQuizResolverPort = None):
-        self.wrong_answer_repo = wrong_answer_repo
-        self.recommender = recommender
-        self.resolver = resolver  # execute_for_enrollment을 쓸 때만 필요(FSRS 파이프라인 진입점)
-
-    def execute_for_enrollment(self, enrollment_id: int, lesson_id: int, k: int = 2) -> dict[int, list[int]]:
-        """FSRS 파이프라인용 진입점: 종호가 가진 (enrollment_id, lesson_id)를 그대로 받아
-        내부에서 (member_id, quiz_id)로 변환한 뒤 execute를 호출한다. 변환에 필요한 값이 없으면
-        (알 수 없는 enrollment, 그 레슨 퀴즈 제출 이력 없음) 조용히 {} 반환 - 추천 없음으로 스킵."""
-        if self.resolver is None:
-            raise RuntimeError("execute_for_enrollment에는 EnrollmentQuizResolverPort 주입이 필요함.")
-        member_id = self.resolver.get_member_id(enrollment_id)
-        if member_id is None:
-            return {}
-        quiz_id = self.resolver.get_latest_quiz_id(member_id, lesson_id)
-        if quiz_id is None:
-            return {}
-        return self.execute(member_id, quiz_id, k)
-
-    def execute(self, student_id: int, quiz_id: int, k: int = 2) -> dict[int, list[int]]:
-        wrong_qids = self.wrong_answer_repo.get_wrong_question_ids(student_id, quiz_id)
-        recommendations = {}
-        for qid in wrong_qids:
-            result = self.recommender.get_similar_problems(student_id, qid, k)
-            if not result:
-                continue  # [] = 잘못된 id -> 건너뜀(BE 계약)
-            similars = result[1:]  # result[0]은 원문제(자기 자신)
-            if similars:  # [원문제]만 온 경우(유사 0개)는 추천 없음으로 스킵
-                recommendations[qid] = similars
-        return recommendations
 
 
 class ComputeRiskUseCase:

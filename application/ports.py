@@ -171,33 +171,3 @@ class ExperimentRepository(Protocol):
         """log_shadow_decision으로 쌓인 결정들을 관리자 집계용으로 조회.
         각 원소는 기록 당시의 decision dict와 같은 형태(domain/shadow_report.py가 이걸 요약)."""
         ...
-
-
-class WrongAnswerRepository(Protocol):
-    def get_wrong_question_ids(self, student_id: int, quiz_id: int) -> list[int]:
-        """해당 학생이 이 퀴즈에서 틀린 question_id 목록(최신 제출 기준). 없으면 [].
-        quiz_submission_answer.is_correct=0 에서 뽑으며, 이 question_id가 곧 추천기의 problem_id다
-        (BE 확인: Qdrant가 quiz_question.question_id를 그대로 point id로 인덱싱 - 같은 id 공간)."""
-        ...
-
-
-class EnrollmentQuizResolverPort(Protocol):
-    """FSRS 파이프라인 키(enrollment_id, lesson_id)를 추천 유스케이스 키(member_id, quiz_id)로 변환.
-    변환을 종호 배치가 아니라 여기(우리 인프라)에 두는 이유: enrollment/lesson_quiz_map 조회는
-    스키마 관심사라 컬럼명 바뀌어도 repositories.py 한 군데만 고치면 되게(CLAUDE.md 절대규칙)."""
-
-    def get_member_id(self, enrollment_id: int) -> int | None:
-        """enrollment_id -> 그 수강의 member_id. 없으면 None."""
-        ...
-
-    def get_latest_quiz_id(self, member_id: int, lesson_id: int) -> int | None:
-        """이 학생이 lesson에 매핑된 퀴즈(N:N lesson_quiz_map) 중 '가장 최근 제출한' quiz_id.
-        get_wrong_question_ids/get_latest_quiz_score의 '최신 제출' 의미와 일치. 제출 없으면 None."""
-        ...
-
-
-class ProblemRecommenderPort(Protocol):
-    def get_similar_problems(self, student_id: int, problem_id: int, k: int = 2) -> list[int]:
-        """유사문제 추천(BE quiz_recommender 계약). 반환 [원문제id, 유사id...] (result[0]=원문제).
-        유사 부족하면 [원문제] 또는 [원문제,유사1]로 짧아지고, 잘못된 problem_id면 []."""
-        ...
