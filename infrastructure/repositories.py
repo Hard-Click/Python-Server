@@ -399,58 +399,6 @@ class MySQLQuizScoreRepository:
             return float(row["avg_score"]) if row and row["avg_score"] is not None else None
 
 
-class MySQLWrongAnswerRepository:
-    """학생의 특정 퀴즈 '최신 제출'에서 틀린 question_id 목록.
-
-    quiz_submission(제출 헤더) -> quiz_submission_answer(문항별 정오) 조인.
-    같은 학생이 같은 퀴즈를 여러 번 냈으면 submitted_at이 가장 최신인 제출만 본다(재응시 이전 오답 배제).
-    반환 question_id가 곧 추천기 problem_id (BE 확인: 같은 id 공간, 매핑 불필요).
-    """
-
-    def get_wrong_question_ids(self, student_id: int, quiz_id: int) -> list[int]:
-        sql = """
-            SELECT a.question_id
-            FROM quiz_submission s
-            JOIN quiz_submission_answer a ON a.submission_id = s.submission_id
-            WHERE s.member_id = %s AND s.quiz_id = %s AND a.is_correct = 0
-              AND s.submitted_at = (
-                  SELECT MAX(s2.submitted_at) FROM quiz_submission s2
-                  WHERE s2.member_id = %s AND s2.quiz_id = %s
-              )
-            ORDER BY a.question_id
-        """
-        with get_connection() as conn, conn.cursor() as cur:
-            cur.execute(sql, (student_id, quiz_id, student_id, quiz_id))
-            return [row["question_id"] for row in cur.fetchall()]
-
-
-class MySQLEnrollmentQuizResolver:
-    """FSRS 파이프라인 키(enrollment_id, lesson_id) -> 추천 유스케이스 키(member_id, quiz_id) 변환.
-    종호 배치는 자기가 가진 enrollment_id/lesson_id만 넘기면 되고 매핑은 여기서 처리한다.
-    lesson↔quiz는 N:N(lesson_quiz_map)이라 '이 학생이 그 레슨 퀴즈 중 가장 최근 제출한 quiz'를 택함."""
-
-    def get_member_id(self, enrollment_id: str):
-        sql = "SELECT member_id FROM enrollment WHERE enrollment_id = %s"
-        with get_connection() as conn, conn.cursor() as cur:
-            cur.execute(sql, (enrollment_id,))
-            row = cur.fetchone()
-            return row["member_id"] if row else None
-
-    def get_latest_quiz_id(self, member_id: str, lesson_id: str):
-        sql = """
-            SELECT qs.quiz_id
-            FROM quiz_submission qs
-            JOIN lesson_quiz_map lqm ON lqm.quiz_id = qs.quiz_id
-            WHERE qs.member_id = %s AND lqm.lesson_id = %s
-            ORDER BY qs.submitted_at DESC
-            LIMIT 1
-        """
-        with get_connection() as conn, conn.cursor() as cur:
-            cur.execute(sql, (member_id, lesson_id))
-            row = cur.fetchone()
-            return row["quiz_id"] if row else None
-
-
 class MySQLActivityRepository:
     def get_recency_and_streak(self, enrollment_id: str) -> tuple:
         sql = """
