@@ -317,14 +317,14 @@ class MySQLReviewCardRepository:
 
     def save_card(self, enrollment_id: str, lesson_id: str, card: Card) -> None:
         sql = """
-            INSERT INTO review_card (enrollment_id, lesson_id, stability, difficulty, due, state)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO review_card (enrollment_id, lesson_id, stability, difficulty, due, last_review, state)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
               stability = VALUES(stability), difficulty = VALUES(difficulty),
-              due = VALUES(due), state = VALUES(state)
+              due = VALUES(due), last_review = VALUES(last_review), state = VALUES(state)
         """
         with get_connection() as conn, conn.cursor() as cur:
-            cur.execute(sql, (enrollment_id, lesson_id, card.stability, card.difficulty, card.due, str(card.state)))
+            cur.execute(sql, (enrollment_id, lesson_id, card.stability, card.difficulty, card.due, card.last_review, str(card.state)))
 
 
 class MySQLPendingReviewRepository:
