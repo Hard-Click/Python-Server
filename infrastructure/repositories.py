@@ -317,14 +317,14 @@ class MySQLReviewCardRepository:
 
     def save_card(self, enrollment_id: str, lesson_id: str, card: Card) -> None:
         sql = """
-            INSERT INTO review_card (enrollment_id, lesson_id, stability, difficulty, due, state)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO review_card (enrollment_id, lesson_id, stability, difficulty, due, last_review, state)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
               stability = VALUES(stability), difficulty = VALUES(difficulty),
-              due = VALUES(due), state = VALUES(state)
+              due = VALUES(due), last_review = VALUES(last_review), state = VALUES(state)
         """
         with get_connection() as conn, conn.cursor() as cur:
-            cur.execute(sql, (enrollment_id, lesson_id, card.stability, card.difficulty, card.due, str(card.state)))
+            cur.execute(sql, (enrollment_id, lesson_id, card.stability, card.difficulty, card.due, card.last_review, str(card.state)))
 
 
 class MySQLPendingReviewRepository:
@@ -430,7 +430,7 @@ class MySQLEnrollmentQuizResolver:
     lesson↔quiz는 N:N(lesson_quiz_map)이라 '이 학생이 그 레슨 퀴즈 중 가장 최근 제출한 quiz'를 택함."""
 
     def get_member_id(self, enrollment_id: str):
-        sql = "SELECT member_id FROM enrollment WHERE id = %s"
+        sql = "SELECT member_id FROM enrollment WHERE enrollment_id = %s"
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql, (enrollment_id,))
             row = cur.fetchone()
