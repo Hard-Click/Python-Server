@@ -112,19 +112,49 @@ EXPECTED_SEC = EXPECTED_MIN * 60
 # start_time = 슬롯 표시 시각(코스별로 어긋나게 해 캘린더에서 안 겹치게).
 #   bank!=None 이면 MATH_QUIZ_BANK[bank]의 섹션(=강의)마다 실문제 10개 퀴즈. lessons=강의 수.
 #   수학은 취약(5등급) + avail_frac 합 0.44 로 학습시간 더 배분. avail_frac 4코스 합=1.0.
+# objectives=학습목표 / audience=추천대상 / related=연관과목(course.tech_tags에 저장) /
+# level=난이도(course.level 자유텍스트, course_learning_policy.difficulty와 별개로 코스상세에 노출).
 DEMO_COURSES = [
     dict(key="kor",   title="수능 국어 완성 (데모)",          subject="국어",     grade=3,
          lessons=10, bank=None,    weeks=12, daily=100, difficulty="MEDIUM", weekly_max=700,
-         avail_frac=0.28, start_time="19:00:00", thumb=DEMO_COURSE_THUMB),
+         avail_frac=0.28, start_time="19:00:00", thumb=DEMO_COURSE_THUMB,
+         level="중급",
+         objectives=["문학·비문학 지문을 근거로 읽는 독해 원리 확립",
+                     "선택지 소거법과 빈출 함정 유형 대비",
+                     "실전 시간 배분과 오답 관리 루틴 확립"],
+         audience=["국어 3~4등급에서 안정적 2등급을 목표하는 수험생",
+                   "감으로 풀어 점수 편차가 큰 학생"],
+         related=["화법과 작문", "언어와 매체", "문학"]),
     dict(key="math1", title="수학Ⅰ·Ⅱ 개념 완성",             subject="수학",     grade=5,
          lessons=5,  bank="math1", weeks=12, daily=140, difficulty="HARD",   weekly_max=980,
-         avail_frac=0.24, start_time="20:00:00", thumb=_thumb("1509228468518-180dd4864904")),
+         avail_frac=0.24, start_time="20:00:00", thumb=_thumb("1509228468518-180dd4864904"),
+         level="중급~고급",
+         objectives=["지수·로그·삼각함수 개념 완성",
+                     "수열·극한의 계산 감각 확립",
+                     "킬러 문항 접근 전략 훈련"],
+         audience=["수학 4~5등급에서 개념 구멍을 메우려는 수험생",
+                   "기출 적용이 약한 학생"],
+         related=["미적분", "확률과 통계", "기하"]),
     dict(key="math2", title="수학 선택과목(확통·미적) 특강",  subject="수학",     grade=5,
          lessons=5,  bank="math2", weeks=12, daily=120, difficulty="HARD",   weekly_max=840,
-         avail_frac=0.20, start_time="21:00:00", thumb=_thumb("1434030216411-0b793f4b4173")),
+         avail_frac=0.20, start_time="21:00:00", thumb=_thumb("1434030216411-0b793f4b4173"),
+         level="고급",
+         objectives=["순열·조합·확률의 기본기 완성",
+                     "통계적 추정 핵심 유형 정리",
+                     "수열의 극한·미적분 실전 감각 강화"],
+         audience=["확통·미적을 선택한 수험생",
+                   "선택과목 개념이 흔들리는 학생"],
+         related=["수학Ⅰ", "수학Ⅱ", "미적분", "확률과 통계"]),
     dict(key="soc",   title="사회탐구 개념 완성 (데모)",      subject="사회탐구", grade=4,
          lessons=10, bank=None,    weeks=10, daily=90,  difficulty="MEDIUM", weekly_max=630,
-         avail_frac=0.28, start_time="19:30:00", thumb=_thumb("1524995997946-a1c2e315a42f")),
+         avail_frac=0.28, start_time="19:30:00", thumb=_thumb("1524995997946-a1c2e315a42f"),
+         level="중급",
+         objectives=["핵심 개념 압축 정리",
+                     "자료·도표 해석 훈련",
+                     "빈출 선지 오답 정리"],
+         audience=["사탐 개념을 빠르게 훑고 싶은 수험생",
+                   "선택과목을 처음 시작하는 학생"],
+         related=["생활과 윤리", "사회·문화", "한국지리"]),
 ]
 DEMO_COURSE_BY_KEY = {c["key"]: c for c in DEMO_COURSES}
 PRIMARY_COURSE_KEY = "kor"   # 이탈위험·활동이력은 이 enrollment 하나에만 심음(학생당 1줄)
@@ -271,6 +301,35 @@ def state_name(card):
     return nm if nm in ("NEW", "LEARNING", "REVIEW", "RELEARNING") else "REVIEW"
 
 
+# 리뷰 템플릿 (rating, content) — 코스별로 회전시켜 심는다. 평균 ≈ 4.4.
+REVIEW_TEMPLATES = [
+    (5, "설명이 군더더기 없이 깔끔해서 이해가 빠릅니다. 강추해요."),
+    (5, "개념 잡는 방식이 확실히 달라요. 덕분에 성적이 올랐습니다."),
+    (4, "전반적으로 만족스러워요. 심화 문제가 조금 더 있으면 완벽할 듯."),
+    (5, "혼자 헤매던 부분이 한 번에 정리됐어요."),
+    (4, "커리큘럼이 체계적이라 따라가기 좋습니다."),
+    (3, "내용은 좋은데 진도가 살짝 빠른 느낌이에요."),
+    (5, "예시가 실전과 딱 맞아 바로 적용됩니다."),
+    (4, "복습 자료가 잘 돼 있어 반복 학습하기 좋아요."),
+]
+
+# 코스별 공지 템플릿 (is_pinned, title, content). 코스당 4개(첫 개는 상단 고정).
+NOTICE_TEMPLATES = [
+    (True,  "[필독] 수강 전 학습 가이드 안내",
+     "본 강의는 개념 → 기출 적용 → 복습 퀴즈 순으로 구성돼 있습니다. "
+     "1강 오리엔테이션을 먼저 시청하신 뒤 순서대로 학습해 주세요."),
+    (False, "주차별 학습 진도 안내",
+     "AI 스케줄러가 배정한 이번 주 강의를 '오늘 할 일'에서 확인할 수 있습니다. "
+     "밀린 강의는 자동으로 다음 주에 재배치되니 부담 없이 따라오세요."),
+    (False, "복습 퀴즈 이용 방법 안내",
+     "각 강의 수강 후 제공되는 퀴즈를 꼭 풀어 주세요. 결과에 따라 복습 카드가 "
+     "생성되어 최적의 시점에 다시 안내됩니다."),
+    (False, "질문 게시판 운영 안내",
+     "학습 중 궁금한 점은 커뮤니티 질문 게시판에 남겨 주세요. 영업일 기준 "
+     "24시간 이내에 답변드립니다."),
+]
+
+
 class Seeder:
     def __init__(self, conn):
         self.conn = conn
@@ -305,6 +364,14 @@ class Seeder:
         course_ids = [r["course_id"] for r in self.cur.fetchall()]
         self.cur.execute("SELECT enrollment_id FROM enrollment WHERE member_id IN (%s)" % ids)
         enr_ids = [r["enrollment_id"] for r in self.cur.fetchall()]
+        # 신규 시드(리뷰/공지) 정리 — course FK가 있어도 FOREIGN_KEY_CHECKS=0 상태라
+        # 코스만 지우면 고아 행이 남으므로 명시적으로 지운다.
+        self.cur.execute(f"DELETE FROM reviews WHERE member_id IN ({ids})")
+        self.cur.execute(f"DELETE FROM notices WHERE author_id IN ({iph})")
+        if course_ids:
+            cph = ",".join(str(c) for c in course_ids)
+            self.cur.execute(f"DELETE FROM reviews WHERE course_id IN ({cph})")
+            self.cur.execute(f"DELETE FROM notices WHERE course_id IN ({cph})")
 
         def del_in(table, col, vals):
             if vals:
@@ -373,9 +440,11 @@ class Seeder:
                (mid, name, f"{username}@flown.demo", username, PW_HASH, role, dt_str(TODAY_DT)))
 
     def _lesson(self, order, title, section_id):
-        """재생 영상 붙은 lesson 1개. duration_seconds는 실제 영상 길이(DEMO_VIDEOS)로 맞춘다 —
-        효율계수 계산은 이 값이 아니라 EXPECTED_MIN 상수를 직접 쓰므로 서로 영향 없음."""
-        vurl, secs = DEMO_VIDEOS[(order - 1) % len(DEMO_VIDEOS)]
+        """재생 영상 붙은 lesson 1개. order_index는 0-based(코스상세 API가 isPreview를
+        section.orderIndex==0 && lesson.orderIndex==0 으로 계산 — 첫 섹션·첫 레슨만 미리보기).
+        duration_seconds는 실제 영상 길이(DEMO_VIDEOS)로 맞춘다 — 효율계수 계산은 이 값이
+        아니라 EXPECTED_MIN 상수를 직접 쓰므로 서로 영향 없음."""
+        vurl, secs = DEMO_VIDEOS[order % len(DEMO_VIDEOS)]
         lid = self.x("""INSERT INTO lesson
             (created_at, order_index, title, section_id, duration_seconds, video_url, file_processing_status)
             VALUES (%s,%s,%s,%s,%s,%s,'COMPLETED')""",
@@ -418,15 +487,22 @@ class Seeder:
     def _build_course(self, spec):
         """코스 1개 = 강의 N + 선수관계 + 정책 + 강의당 퀴즈1. bank 있으면 섹션=강의로 실문제 심음."""
         thumbnail = _s3_thumb(DEMO_THUMB_KEYS.get(spec["key"])) or spec["thumb"]
+        # 코스상세 소개 필드: 학습목표/추천대상은 개행조인 TEXT(CourseJpaEntity가 \n 으로 split),
+        # 연관과목은 전용 컬럼이 없어 tech_tags 에 담는다(코스상세 techTags 로 노출).
         course_id = self.x("""INSERT INTO course
-            (author_id, price, title, created_at, description, price_type, status, subject, thumbnail_url)
-            VALUES (%s, 0, %s, %s, %s, 'FREE', 'PUBLISHED', %s, %s)""",
-            (INSTRUCTOR_ID, spec["title"], dt_str(TODAY_DT), "데모용 코스", spec["subject"], thumbnail))
+            (author_id, price, title, created_at, description, price_type, status, subject, thumbnail_url,
+             learning_objectives, target_audience, tech_tags, level)
+            VALUES (%s, 0, %s, %s, %s, 'FREE', 'PUBLISHED', %s, %s, %s, %s, %s, %s)""",
+            (INSTRUCTOR_ID, spec["title"], dt_str(TODAY_DT),
+             f"{spec['title']} — 데모용 코스", spec["subject"], thumbnail,
+             "\n".join(spec.get("objectives", [])), "\n".join(spec.get("audience", [])),
+             "\n".join(spec.get("related", [])), spec.get("level")))
         lessons = []
         quiz_by_lesson = {}
         if spec.get("bank"):
             # 섹션(=단원) 하나 = 강의 1 + 퀴즈 1(문항 10). course_section.title = 단원명.
-            for si, sec in enumerate(MATH_QUIZ_BANK[spec["bank"]]["sections"], 1):
+            # order_index 0-based: 첫 섹션(0)·첫 레슨(0)만 isPreview=true 가 되도록.
+            for si, sec in enumerate(MATH_QUIZ_BANK[spec["bank"]]["sections"], 0):
                 section_id = self.x("INSERT INTO course_section (order_index, title, course_id) VALUES (%s,%s,%s)",
                                     (si, sec["title"], course_id))
                 lid = self._lesson(si, sec["title"], section_id)
@@ -436,15 +512,15 @@ class Seeder:
                 self.x("INSERT INTO lesson_quiz_map (lesson_id, quiz_id) VALUES (%s,%s)", (lid, qid))
                 quiz_by_lesson[lid] = (qid, self._quiz_from_bank(qid, sec["questions"]))
         else:
-            section_id = self.x("INSERT INTO course_section (order_index, title, course_id) VALUES (1,%s,%s)",
+            section_id = self.x("INSERT INTO course_section (order_index, title, course_id) VALUES (0,%s,%s)",
                                 ("전체", course_id))
-            for i in range(1, spec["lessons"] + 1):
-                lid = self._lesson(i, f"{i}강", section_id)
+            for i in range(0, spec["lessons"]):
+                lid = self._lesson(i, f"{i + 1}강", section_id)
                 lessons.append(lid)
                 qid = self.x("INSERT INTO quiz (course_id, section_id, instructor_id, title) VALUES (%s,%s,%s,%s)",
-                            (course_id, section_id, INSTRUCTOR_ID, f"{i}강 퀴즈"))
+                            (course_id, section_id, INSTRUCTOR_ID, f"{i + 1}강 퀴즈"))
                 self.x("INSERT INTO lesson_quiz_map (lesson_id, quiz_id) VALUES (%s,%s)", (lid, qid))
-                quiz_by_lesson[lid] = (qid, self._quiz_generic(qid, i))
+                quiz_by_lesson[lid] = (qid, self._quiz_generic(qid, i + 1))
         # 선수관계: 순차(각 강의는 직전 강의 선수) - CP-SAT 순서 제약 시연
         for a, b in zip(lessons, lessons[1:]):
             self.x("INSERT INTO lesson_prerequisite (lesson_id, prerequisite_lesson_id) VALUES (%s,%s)", (b, a))
@@ -459,6 +535,15 @@ class Seeder:
         """강사 + 데모 코스 3개(각 lesson N·선수관계·정책·퀴즈) + fsrs global.
         반환: {course_key: fixture dict}."""
         self.member(INSTRUCTOR_ID, "김강사데모", "demo_inst", "INSTRUCTOR")
+        # 강사 경력/소개 — member()는 이 필드를 안 채우므로 코스상세의 instructorCareer 등이 비었다.
+        self.x("""UPDATE members
+            SET one_line_intro=%s, introduction=%s, career=%s WHERE member_id=%s""",
+            ("수능 수학·국어 15년, 개념부터 실전까지",
+             "현장 강의 15년 동안 학생 수준별 맞춤 커리큘럼을 설계해 왔습니다. "
+             "개념의 '왜'를 먼저 잡고, 기출로 바로 적용하는 방식으로 점수 반등을 만듭니다.",
+             "前) 메가스터디 수학 대표강사\n前) 대성마이맥 국어 강사\n"
+             "現) Flown 대표 강사 · 수능 수학/국어 교재 다수 집필\n서울대학교 수학교육과 졸업",
+             INSTRUCTOR_ID))
         courses = {spec["key"]: self._build_course(spec) for spec in DEMO_COURSES}
         # FSRS global params (전역 1행)
         try:
@@ -485,23 +570,99 @@ class Seeder:
                 (mid, c["name"], f"{uname}@flown.demo", uname, PW_HASH,
                  c["career"], c["intro"], c["one_line"], dt_str(TODAY_DT)))
             cthumb = (_s3_thumb(CATALOG_THUMB_KEYS[idx % len(CATALOG_THUMB_KEYS)]) if CATALOG_THUMB_KEYS else None) or CATALOG_THUMBS[idx]
+            # 둘러보기 코스도 상세 소개 필드를 채운다(비면 상세 화면이 휑함). 과목에서 파생한 일반값.
+            objectives = "\n".join([f"{c['subject']} 핵심 개념을 체계적으로 정리",
+                                    "빈출 유형과 기출 적용 훈련", "실전 감각과 시간 관리 향상"])
+            audience = "\n".join([f"{c['subject']} 기초를 탄탄히 다지려는 수험생",
+                                  "혼자 공부하다 방향 잡기 어려운 학생"])
+            tech_tags = "\n".join([c["subject"], "수능", "개념완성"])
             course_id = self.x("""INSERT INTO course
-                (author_id, price, title, created_at, description, price_type, status, subject, thumbnail_url)
-                VALUES (%s, 0, %s, %s, %s, 'FREE', 'PUBLISHED', %s, %s)""",
+                (author_id, price, title, created_at, description, price_type, status, subject, thumbnail_url,
+                 learning_objectives, target_audience, tech_tags, level)
+                VALUES (%s, 0, %s, %s, %s, 'FREE', 'PUBLISHED', %s, %s, %s, %s, %s, '중급')""",
                 (mid, c["course"], dt_str(TODAY_DT),
-                 f"{c['name']} 강사의 {c['course']}. {c['intro']}", c["subject"], cthumb))
-            section_id = self.x("INSERT INTO course_section (order_index, title, course_id) VALUES (1,%s,%s)",
+                 f"{c['name']} 강사의 {c['course']}. {c['intro']}", c["subject"], cthumb,
+                 objectives, audience, tech_tags))
+            section_id = self.x("INSERT INTO course_section (order_index, title, course_id) VALUES (0,%s,%s)",
                                 ("전체", course_id))
-            for li in range(1, 5):   # 강의 4개, 재생되는 영상 부여
-                url, secs = DEMO_VIDEOS[(li - 1) % len(DEMO_VIDEOS)]
+            for li in range(0, 4):   # 강의 4개, 재생되는 영상 부여. order_index 0-based(첫 레슨 미리보기).
+                url, secs = DEMO_VIDEOS[li % len(DEMO_VIDEOS)]
                 self.x("""INSERT INTO lesson
                     (created_at, order_index, title, section_id, duration_seconds, video_url, file_processing_status)
                     VALUES (%s,%s,%s,%s,%s,%s,'COMPLETED')""",
-                    (dt_str(TODAY_DT), li, f"{li}강", section_id, secs, url))
+                    (dt_str(TODAY_DT), li, f"{li + 1}강", section_id, secs, url))
             # 코스 정책(둘러보기/상세에서 참조) — 데모 코스와 동일 형식
             self.x("""INSERT INTO course_learning_policy
                 (course_id, recommended_duration_weeks, daily_recommended_minutes, difficulty, weekly_max_load_min)
                 VALUES (%s, 8, 90, 'MEDIUM', 630)""", (course_id,))
+
+    def _demo_course_ids(self):
+        """데모 강사(김강사데모) + 카탈로그 강사 10명이 만든 코스 전부(course_id 오름차순)."""
+        iph = ",".join(str(i) for i in [INSTRUCTOR_ID] + CATALOG_INSTRUCTOR_IDS)
+        self.cur.execute(f"SELECT course_id, author_id FROM course WHERE author_id IN ({iph}) ORDER BY course_id")
+        return self.cur.fetchall()
+
+    def reviews(self):
+        """강의 평점·리뷰 시드. 데모 코스 전부에 학생 페르소나(9201~9214)로 리뷰를 심어
+        코스상세 averageRating/reviewCount 와 리뷰 목록을 채운다.
+        코스마다 학생/템플릿을 회전시켜 (member,course) 중복 없이 6~8개 심는다."""
+        students = list(PERSONA_IDS)   # 전부 STUDENT
+        rows = self._demo_course_ids()
+        total = 0
+        for ci, r in enumerate(rows):
+            course_id = r["course_id"]
+            cnt = 6 + (ci % 3)         # 6~8개
+            for k in range(cnt):
+                member_id = students[(ci + k) % len(students)]
+                rating, content = REVIEW_TEMPLATES[(ci + k) % len(REVIEW_TEMPLATES)]
+                created = TODAY_DT - timedelta(days=(k * 5 + ci) % 55 + 1)
+                self.x("""INSERT INTO reviews
+                    (member_id, course_id, rating, content, status, created_at, updated_at)
+                    VALUES (%s,%s,%s,%s,'ACTIVE',%s,%s)""",
+                    (member_id, course_id, rating, content, dt_str(created), dt_str(created)))
+                total += 1
+        return total
+
+    def notices(self):
+        """강의별 공지 시드(type='COURSE'). 코스당 4개(첫 개 상단 고정). 작성자=코스 강사."""
+        rows = self._demo_course_ids()
+        total = 0
+        for ci, r in enumerate(rows):
+            for ni, (pinned, title, body) in enumerate(NOTICE_TEMPLATES):
+                created = TODAY_DT - timedelta(days=(len(NOTICE_TEMPLATES) - ni) * 3 + ci)
+                self.x("""INSERT INTO notices
+                    (author_id, course_id, title, content, is_pinned, type, status, created_at, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,'COURSE','PUBLISHED',%s,%s)""",
+                    (r["author_id"], r["course_id"], title, body, 1 if pinned else 0,
+                     dt_str(created), dt_str(created)))
+                total += 1
+        return total
+
+    def churn_history(self, weeks=8):
+        """이탈위험 추이(/api/admin/churn/trend)가 1주치만 나오는 문제 해결:
+        dropout_risk.computed_at 이 전부 TODAY(=이번 ISO주)라 주차별 집계가 1개뿐이다.
+        현재 HIGH(risk>=0.7) 위험군을 기준으로 과거 (weeks-1)주치를 역채움한다.
+        최근일수록 위험군 수가 많아지는 상승 추이로 심어 데모 그래프가 자연스럽게 보이게 한다."""
+        self.cur.execute("""SELECT enrollment_id, risk_score, method, recency_days, miss_streak, features
+            FROM dropout_risk WHERE risk_score >= 0.7 ORDER BY risk_score DESC""")
+        highs = self.cur.fetchall()
+        if not highs:
+            return 0
+        this_monday = TODAY_DT - timedelta(days=TODAY.weekday())
+        n = len(highs)
+        total = 0
+        for w in range(1, weeks):                       # 과거 (weeks-1)주 (이번 주는 이미 심겨 있음)
+            wk_dt = this_monday - timedelta(days=7 * w) + timedelta(days=1)   # 그 주 화요일
+            k = max(1, round(n * (weeks - w) / weeks))  # 과거일수록 적게 → 상승 추이
+            for row in highs[:k]:
+                past = min(0.95, max(0.70, float(row["risk_score"]) - 0.015 * w))
+                self.x("""INSERT INTO dropout_risk
+                    (enrollment_id, computed_at, risk_score, method, recency_days, miss_streak, features)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                    (row["enrollment_id"], dt_str(wk_dt), past, row["method"],
+                     row["recency_days"], row["miss_streak"], row["features"]))
+                total += 1
+        return total
 
     def persona(self, mid, cfg, courses):
         """학생 1명: 계정·capacity·availability(학생 단위 1회) + 수강 코스별 enrollment 루프.
@@ -752,6 +913,9 @@ def main():
     for mid, cfg in PERSONAS.items():
         print(f"seeding {cfg['name']} ({mid})…")
         results.append(s.persona(mid, cfg, courses))
+    print(f"seeding reviews… ({s.reviews()}건)")
+    print(f"seeding notices… ({s.notices()}건)")
+    print(f"seeding churn history… ({s.churn_history()}건, 최근 8주)")
     conn.commit()
 
     print("\n=== 페르소나 요약 (스케줄/위험은 국어 primary 기준) ===")
