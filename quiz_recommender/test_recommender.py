@@ -225,6 +225,12 @@ _TIME_META = {
     301: {"courseId": 1, "sectionId": 11, "difficulty": 2, "instructorId": None},
     302: {"courseId": 1, "sectionId": 22, "difficulty": 2, "instructorId": None},
     303: {"courseId": 1, "sectionId": 33, "difficulty": 2, "instructorId": None},
+    # 이력(history) 문제들 — 난이도 하(1) 고정 → '느림' 컷오프 120초. (tier는 라운드의 section_id로 결정되므로 여기 sectionId는 무관)
+    1: {"courseId": 1, "sectionId": 11, "difficulty": 1, "instructorId": None},
+    2: {"courseId": 1, "sectionId": 11, "difficulty": 1, "instructorId": None},
+    3: {"courseId": 1, "sectionId": 22, "difficulty": 1, "instructorId": None},
+    4: {"courseId": 1, "sectionId": 11, "difficulty": 1, "instructorId": None},
+    5: {"courseId": 1, "sectionId": 11, "difficulty": 1, "instructorId": None},
 }
 
 
@@ -247,9 +253,9 @@ def time_env(monkeypatch):
 def test_wrong_and_slow_section_ranked_first(time_env, monkeypatch):
     """틀림+느림 단원(22)이 틀림-빠름 단원(11)보다 먼저 추천된다."""
     rounds = [
-        # 중앙값: [10,10,90] → 10 → threshold 15
+        # 난이도 하(컷오프 120초): q1@10=빠름, q3@130=느림
         {"section_id": 11, "answers": [(1, False), (2, True)], "times": {1: 10, 2: 10}},
-        {"section_id": 22, "answers": [(3, False)], "times": {3: 90}},   # 틀림+느림 → tier 0
+        {"section_id": 22, "answers": [(3, False)], "times": {3: 130}},   # 틀림+느림 → tier 0
     ]
     monkeypatch.setattr(personalize.db, "get_answer_rounds", lambda sid: rounds)
     picked = personalize.personalized_recommend(7, 100, 1, 2)
@@ -260,9 +266,9 @@ def test_wrong_and_slow_section_ranked_first(time_env, monkeypatch):
 def test_correct_but_slow_not_excluded(time_env, monkeypatch):
     """맞았지만 느린 문제는 완전 습득이 아니므로 후보에서 제외되지 않는다."""
     rounds = [
-        # 301을 맞혔지만 느림(90 ≥ 15) → mastered 아님 → pool에 남음
+        # 301은 난이도 중(컷오프 240초). 맞혔지만 300≥240 → 느림 → mastered 아님 → pool에 남음
         {"section_id": 11, "answers": [(301, True), (4, True), (5, False)],
-         "times": {301: 90, 4: 10, 5: 10}},
+         "times": {301: 300, 4: 10, 5: 10}},
     ]
     monkeypatch.setattr(personalize.db, "get_answer_rounds", lambda sid: rounds)
     picked = personalize.personalized_recommend(7, 100, 1, 3)
@@ -300,22 +306,13 @@ def test_times_key_missing_is_tolerated(time_env, monkeypatch):
     assert picked[0] == 302
 
 
-def test_zero_median_disables_time_signal(time_env, monkeypatch):
-    """중앙값 0(0초 답 과반 — 백엔드는 0초를 유효값으로 저장) → 신호 끔.
-    threshold=0이면 측정된 전부가 '느림'으로 반전되는 퇴화 케이스 방어."""
+def test_zero_time_is_fast_not_slow(time_env, monkeypatch):
+    """0초(찍고 넘긴 답 — 백엔드는 0초를 유효값으로 저장)는 컷오프 미만이라 '빠름'.
+    맞힌 301은 완전 습득으로 기존처럼 제외된다."""
     rounds = [
-        # times [0,0,90] → 중앙값 0 → 신호 꺼짐 → 맞힌 301은 기존처럼 제외돼야 함
         {"section_id": 11, "answers": [(301, True), (4, True), (5, False)],
          "times": {301: 0, 4: 0, 5: 90}},
     ]
     monkeypatch.setattr(personalize.db, "get_answer_rounds", lambda sid: rounds)
-    assert personalize._slow_threshold(rounds) is None
     picked = personalize.personalized_recommend(7, 100, 1, 3)
-    assert 301 not in picked, "신호 꺼짐 → 맞힌 문제는 기존 동작대로 제외"
-
-
-def test_even_sample_uses_true_median():
-    """짝수 표본은 진짜 중앙값(두 가운데 값 평균) 기준: [10,20,30,40] → 25 × 1.5 = 37.5."""
-    rounds = [{"section_id": 1, "answers": [(1, True), (2, True), (3, True), (4, True)],
-               "times": {1: 10, 2: 20, 3: 30, 4: 40}}]
-    assert personalize._slow_threshold(rounds) == 37.5
+    assert 301 not in picked, "0초 맞힘 = 빠름 = 완전 습득 → 제외"

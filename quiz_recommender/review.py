@@ -5,7 +5,7 @@
 역할 분담 — 종준 FSRS 는 타이밍(언제 뿌릴지)만, 무엇을 복습할지는 여기서 결정한다.
 
 선정 규칙(확정):
-  ① 섹션별 tier + '느림' 기준선 계산 (personalize 재사용)
+  ① 섹션별 tier + 난이도별 '느림' 판정 (personalize 재사용)
   ② 복습 후보 = 이미 푼 문제 중 (틀림+느림 > 틀림 > 맞음+느림). 맞음+빠름(완전습득) 제외
   ③ 급한 순 정렬: 1차 섹션 tier(낮을수록 급함) · 2차 문제 우선순위 · 3차 오래 걸린 순
   ④ 섹션당 원문제 최대 MAX_PER_SECTION, 전체 최대 MAX_TOTAL 까지
@@ -58,8 +58,7 @@ def _select_originals(rounds: list[dict]) -> list[tuple[int, int]]:
     상한: 섹션당 MAX_PER_SECTION, 전체 MAX_TOTAL.
     한 문제가 여러 번 풀렸으면 가장 급한 기록(우선순위 min, 그 안에서 시간 max)으로 대표.
     """
-    threshold = personalize._slow_threshold(rounds)   # '느림' 기준선(없으면 None → 느림 판정 안 함)
-    section_tier, _mastered = personalize._history_signals(rounds, threshold)
+    section_tier, _mastered = personalize._history_signals(rounds)
 
     # 문제별로 가장 급한 기록만 남긴다: {qid: (section_id, priority, time)}
     best: dict[int, tuple[int, int, float]] = {}
@@ -68,7 +67,7 @@ def _select_originals(rounds: list[dict]) -> list[tuple[int, int]]:
         times = rd.get("times", {})
         for qid, ok in rd["answers"]:
             t = times.get(qid)
-            slow = threshold is not None and t is not None and t >= threshold
+            slow = personalize._is_slow(qid, t)   # 난이도별 목표시간 초과 여부
             if ok and not slow:
                 continue  # 맞음+빠름 = 완전 습득 → 원문제 후보 아님
             priority = 0 if (not ok and slow) else 1 if not ok else 2  # 틀림+느림 / 틀림 / 맞음+느림
