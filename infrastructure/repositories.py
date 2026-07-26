@@ -186,6 +186,52 @@ class MySQLLessonProgressRepository:
 
 
 class MySQLScheduleRepository:
+    # 하루 상한을 못 구했을 때(온보딩 전이라 student_capacity 행이 없는 경우) 쓰는 폴백.
+    # DEFAULT_WEEKLY_AVAILABLE_MINUTES(420)/평균 학습일수(6)와 같은 성격의 콜드스타트 placeholder.
+    _FALLBACK_DAILY_CAP_MIN = 120
+
+    def _fetch_day_spread_inputs(self, cur, enrollment_id):
+        """요일 분산에 쓸 쉬는날 비트마스크(bit0=일 ... bit6=토)와 하루 상한(분)을 조회.
+        onboarding 전이면 rest_days=0(쉬는날 없음 간주)·daily_cap_min=폴백으로 처리한다
+        (뭉쳐서 하루에 다 꽂히는 것보단, 정보가 없어도 매일 고르게 흩는 쪽이 낫다)."""
+        cur.execute(
+            "SELECT rest_days FROM enrollment_onboarding WHERE enrollment_id = %s",
+            (enrollment_id,),
+        )
+        row = cur.fetchone()
+        rest_days = row["rest_days"] if row and row["rest_days"] is not None else 0
+
+        cur.execute(
+            """SELECT sc.daily_cap_min FROM student_capacity sc
+               JOIN enrollment e ON e.member_id = sc.student_id
+               WHERE e.enrollment_id = %s""",
+            (enrollment_id,),
+        )
+        row = cur.fetchone()
+        daily_cap_min = row["daily_cap_min"] if row and row["daily_cap_min"] else self._FALLBACK_DAILY_CAP_MIN
+        return rest_days, daily_cap_min
+
+    @staticmethod
+    def _spread_lessons_over_week(lesson_durations: list[tuple], rest_days, daily_cap_min: int) -> dict:
+        """같은 주(week_offset)에 배정된 강의들을 요일별 day_offset(0~6)으로 분산.
+        하루 상한을 넘기면 다음 학습일로 넘기고, 마지막 학습일에서도 넘치면 그 날에 몰아넣는다
+        (domain.reflow.redistribute_remaining_week의 on_track 정책과 동일한 사고방식을
+        초기 생성 시점에도 적용 - 이게 없으면 한 주 분량이 전부 그 주 첫날에 꽂힌다).
+        rest_days가 None이어도(호출부에서 이미 0으로 정규화하지만, 순수 함수 단독 호출/테스트
+        대비 방어적으로) 쉬는날 없음으로 취급한다."""
+        study_days = [d for d in range(7) if not (int(rest_days or 0) >> d) & 1] or list(range(7))
+
+        day_of_week = {}
+        day_idx = 0
+        day_used = 0
+        for lesson_id, duration_min in lesson_durations:
+            if day_used + duration_min > daily_cap_min and day_idx < len(study_days) - 1:
+                day_idx += 1
+                day_used = 0
+            day_of_week[lesson_id] = study_days[day_idx]
+            day_used += duration_min
+        return day_of_week
+
     def save_weekly_schedule(self, enrollment_id: str, week_no: int, assignment: dict) -> None:
         # effective_from=오늘, locked=0(새로 생성된 스케줄은 기본 잠금 해제 - Frozen Zone은
         # 야간 배치가 "이번 주"에 locked=1을 세팅해서 다음 리플로우부터 보호하는 방식으로 운용)
@@ -193,19 +239,36 @@ class MySQLScheduleRepository:
             INSERT INTO weekly_schedule (enrollment_id, week_no, generated_at, effective_from, locked)
             VALUES (%s, %s, NOW(), CURDATE(), 0)
         """
+        # plan_date = 오늘 + (배정된 주 오프셋*7일 + 그 주 안에서의 요일 오프셋).
+        # 이전엔 day 오프셋이 없어 한 주 분량(assignment의 week_offset이 같은 강의들)이
+        # 전부 오늘 하루에 꽂혔다(§ 온보딩 직후 라이브 생성에서 실측 확인, 2026-07 데모 준비 중).
         sql_slot = """
             INSERT INTO schedule_slot (weekly_schedule_id, lesson_id, plan_date, planned_min, status)
-            VALUES (%s, %s, DATE_ADD(CURDATE(), INTERVAL %s WEEK), %s, 'PLANNED')
+            VALUES (%s, %s, DATE_ADD(CURDATE(), INTERVAL %s DAY), %s, 'PLANNED')
         """
         sql_lesson_duration = "SELECT duration_seconds / 60 AS duration_min FROM lesson WHERE id = %s"
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(sql_schedule, (enrollment_id, week_no))
             schedule_id = cur.lastrowid
+
+            rest_days, daily_cap_min = self._fetch_day_spread_inputs(cur, enrollment_id)
+
+            by_week: dict[int, list] = {}
             for lesson_id, week_offset in assignment.items():
-                cur.execute(sql_lesson_duration, (lesson_id,))
-                row = cur.fetchone()
-                planned_min = row["duration_min"] if row else 0
-                cur.execute(sql_slot, (schedule_id, lesson_id, week_offset, planned_min))
+                by_week.setdefault(week_offset, []).append(lesson_id)
+
+            for week_offset, lesson_ids in by_week.items():
+                lesson_durations = []
+                for lesson_id in lesson_ids:
+                    cur.execute(sql_lesson_duration, (lesson_id,))
+                    row = cur.fetchone()
+                    lesson_durations.append((lesson_id, row["duration_min"] if row else 0))
+
+                day_of_week = self._spread_lessons_over_week(lesson_durations, rest_days, daily_cap_min)
+
+                for lesson_id, planned_min in lesson_durations:
+                    total_day_offset = week_offset * 7 + day_of_week[lesson_id]
+                    cur.execute(sql_slot, (schedule_id, lesson_id, total_day_offset, planned_min))
 
 
 class MySQLStudentNotificationRepository:
