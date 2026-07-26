@@ -214,22 +214,39 @@ class MySQLScheduleRepository:
     @staticmethod
     def _spread_lessons_over_week(lesson_durations: list[tuple], rest_days, daily_cap_min: int) -> dict:
         """같은 주(week_offset)에 배정된 강의들을 요일별 day_offset(0~6)으로 분산.
-        하루 상한을 넘기면 다음 학습일로 넘기고, 마지막 학습일에서도 넘치면 그 날에 몰아넣는다
-        (domain.reflow.redistribute_remaining_week의 on_track 정책과 동일한 사고방식을
-        초기 생성 시점에도 적용 - 이게 없으면 한 주 분량이 전부 그 주 첫날에 꽂힌다).
+
+        분산학습(distributed/spaced practice)이 집중학습(massed practice)보다 기억 정착에
+        유리하다는 원리를 따른다 - 하루 상한 안에 다 들어갈 만큼 여유가 있어도(예: 5강×40분
+        vs 하루 480분 상한) 압축해서 하루에 몰아넣지 않고, 학습 가능일에 최대한 고르게
+        라운드로빈으로 흩뿌리는 것을 기본으로 한다(이 코드베이스가 복습(FSRS)엔 이미
+        간격효과를 쓰면서 최초 배정만 압축 우선이던 모순을 없앤다).
+
+        하루 상한은 여전히 하드 상한으로 지킨다 - 라운드로빈 결과가 그 날의 상한을 넘기면
+        같은 주 안에서 여유 있는 다른 학습일로 넘기고, 어느 학습일에도 여유가 없으면
+        (전체 배정량이 이미 CP-SAT의 주간 상한 제약을 통과했다는 전제하에 드문 경우) 원래
+        라운드로빈 배정일에 그대로 둔다(완주 불가 여부는 상위 CP-SAT/알림 로직 담당).
+
         rest_days가 None이어도(호출부에서 이미 0으로 정규화하지만, 순수 함수 단독 호출/테스트
         대비 방어적으로) 쉬는날 없음으로 취급한다."""
         study_days = [d for d in range(7) if not (int(rest_days or 0) >> d) & 1] or list(range(7))
+        num_days = len(study_days)
 
-        day_of_week = {}
-        day_idx = 0
-        day_used = 0
+        # 1) 분산 우선: 순서대로 학습 가능일에 라운드로빈 배정(압축하지 않음).
+        day_of_week = {lid: study_days[i % num_days] for i, (lid, _) in enumerate(lesson_durations)}
+
+        # 2) 하루 상한 가드: 라운드로빈 배정일이 상한을 넘기면 같은 주의 다른 학습일로 이동.
+        day_used = {d: 0 for d in study_days}
         for lesson_id, duration_min in lesson_durations:
-            if day_used + duration_min > daily_cap_min and day_idx < len(study_days) - 1:
-                day_idx += 1
-                day_used = 0
-            day_of_week[lesson_id] = study_days[day_idx]
-            day_used += duration_min
+            day = day_of_week[lesson_id]
+            if day_used[day] + duration_min > daily_cap_min:
+                start_idx = study_days.index(day)
+                for offset in range(1, num_days):
+                    candidate = study_days[(start_idx + offset) % num_days]
+                    if day_used[candidate] + duration_min <= daily_cap_min:
+                        day = candidate
+                        day_of_week[lesson_id] = day
+                        break
+            day_used[day] += duration_min
         return day_of_week
 
     def save_weekly_schedule(self, enrollment_id: str, week_no: int, assignment: dict) -> None:
